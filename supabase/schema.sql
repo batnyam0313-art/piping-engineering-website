@@ -338,3 +338,45 @@ create trigger trg_set_request_id
   before insert on project_requests
   for each row
   execute function set_request_id();
+
+-- The "anon can submit project requests" INSERT policy (with check (true))
+-- only restricts which rows can be inserted, not what values go into them --
+-- a visitor could otherwise POST straight to the REST API and set status,
+-- internal_notes, or activity directly (e.g. fabricating a fake "approved by
+-- admin" note). Force these to safe, system-controlled values on every
+-- insert regardless of what the client sends, mirroring set_request_id().
+create or replace function enforce_new_request_defaults()
+returns trigger
+language plpgsql
+as $$
+begin
+  new.status := 'NEW';
+  new.internal_notes := '[]'::jsonb;
+  new.activity := jsonb_build_array(jsonb_build_object('text', 'Request created', 'date', now()));
+  return new;
+end;
+$$;
+
+drop trigger if exists trg_enforce_new_request_defaults on project_requests;
+create trigger trg_enforce_new_request_defaults
+  before insert on project_requests
+  for each row
+  execute function enforce_new_request_defaults();
+
+-- Same reasoning for contact_messages: force read = false on insert so a
+-- visitor can't submit a message pre-marked as already read.
+create or replace function enforce_new_message_defaults()
+returns trigger
+language plpgsql
+as $$
+begin
+  new.read := false;
+  return new;
+end;
+$$;
+
+drop trigger if exists trg_enforce_new_message_defaults on contact_messages;
+create trigger trg_enforce_new_message_defaults
+  before insert on contact_messages
+  for each row
+  execute function enforce_new_message_defaults();
