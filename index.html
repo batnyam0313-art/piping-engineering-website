@@ -444,9 +444,29 @@ table.admin-table tr:hover td{background:var(--gray-light);}
 @media(max-width:640px){.detail-grid{grid-template-columns:1fr;}.admin-panel-head{flex-direction:column;align-items:flex-start;}}
 .note-item{background:var(--gray-light);border-radius:var(--radius-sm);padding:12px 14px;margin-bottom:8px;font-size:13px;}
 .note-item .nd{font-size:11px;color:#8a97a4;margin-top:4px;}
+
+/* ===== Scroll progress bar ===== */
+.scroll-progress{position:fixed;top:0;left:0;height:3px;width:0%;background:var(--orange);z-index:1200;transition:width .1s linear;pointer-events:none;}
+
+/* ===== Scroll-reveal effect ===== */
+.reveal{opacity:0;transform:translateY(36px);transition:opacity .7s cubic-bezier(.2,.65,.3,1),transform .7s cubic-bezier(.2,.65,.3,1);}
+.reveal.reveal-visible{opacity:1;transform:translateY(0);}
+.reveal-stagger.reveal-visible{transition-delay:calc(var(--reveal-i, 0) * 70ms);}
+@media(prefers-reduced-motion:reduce){
+  .reveal,.reveal.reveal-visible{transition:none;transform:none;opacity:1;}
+}
+
+/* ===== Hero parallax layer ===== */
+.hero{will-change:background-position;}
+
+/* ===== Card micro-interaction polish ===== */
+.service-card,.project-row,.safety-card{transition:box-shadow .3s ease,transform .3s ease;}
+.service-card:hover{transform:translateY(-6px);}
+.filter-btn,.icon-btn,.nav-links a,.social-row a{transition:all .2s ease;}
 </style>
 </head>
 <body>
+<div class="scroll-progress" id="scrollProgress"></div>
 <div id="appRoot">
 
 <!-- ===================== PUBLIC SITE ===================== -->
@@ -1273,11 +1293,41 @@ function initializeData(){
 }
 
 /* =====================================================================
+   SECURITY HELPERS
+===================================================================== */
+// Escapes untrusted strings before they are interpolated into innerHTML.
+// Any value that ultimately originates from a site visitor (contact form,
+// project request wizard, uploaded file names) must be passed through this
+// before being placed into a template string that gets assigned to innerHTML.
+function escapeHtml(value){
+  if(value === null || value === undefined) return '';
+  return String(value)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+// Only allow http(s) URLs (and empty) through to href/src attributes,
+// blocking javascript: and data: URI injection from admin-editable link fields.
+function isSafeUrl(url){
+  if(!url) return false;
+  try{
+    const parsed = new URL(url, window.location.href);
+    return parsed.protocol === 'http:' || parsed.protocol === 'https:';
+  }catch(e){
+    return false;
+  }
+}
+
+/* =====================================================================
    IMAGE ERROR HANDLING
 ===================================================================== */
 function handleImgError(img){
   if(img.dataset.fallbackApplied) return;
   img.dataset.fallbackApplied = '1';
+  const computedPosition = window.getComputedStyle(img).position;
   img.removeAttribute('src');
   img.classList.add('img-broken');
   img.alt = img.alt || 'Image unavailable';
@@ -1285,7 +1335,10 @@ function handleImgError(img){
   wrap.className = 'img-broken';
   wrap.style.width = '100%';
   wrap.style.height = img.offsetHeight ? img.offsetHeight + 'px' : '100%';
-  wrap.style.position = img.style.position || 'static';
+  wrap.style.position = computedPosition === 'absolute' ? 'absolute' : 'static';
+  if(wrap.style.position === 'absolute'){
+    wrap.style.inset = '0';
+  }
   wrap.textContent = IMG_FALLBACK_ICON + ' PIPING ENGINEERING';
   if(img.parentNode){
     img.parentNode.replaceChild(wrap, img);
@@ -1483,12 +1536,62 @@ const sectionIds = ['home','about','services','projects','equipment','safety','c
 
 function initNavbarScroll(){
   const navbar = document.getElementById('navbar');
-  function onScroll(){
-    if(window.scrollY > 40) navbar.classList.add('scrolled');
-    else navbar.classList.remove('scrolled');
+  const progressBar = document.getElementById('scrollProgress');
+  const heroEl = document.getElementById('home');
+  let ticking = false;
+
+  function updateOnScroll(){
+    const scrollY = window.scrollY;
+    navbar.classList.toggle('scrolled', scrollY > 40);
+
+    const docHeight = document.documentElement.scrollHeight - window.innerHeight;
+    const pct = docHeight > 0 ? Math.min(100, (scrollY / docHeight) * 100) : 0;
+    progressBar.style.width = pct + '%';
+
+    // Subtle cinematic parallax on the hero background while it's in view.
+    if(heroEl && scrollY < heroEl.offsetHeight){
+      heroEl.style.backgroundPositionY = (scrollY * 0.35) + 'px';
+    }
+    ticking = false;
   }
+
+  function onScroll(){
+    if(!ticking){
+      requestAnimationFrame(updateOnScroll);
+      ticking = true;
+    }
+  }
+
   window.addEventListener('scroll', onScroll, { passive:true });
-  onScroll();
+  updateOnScroll();
+}
+
+/* =====================================================================
+   SCROLL-REVEAL EFFECT
+===================================================================== */
+let revealObserver = null;
+const REVEAL_SELECTOR = '.section-head, .service-card, .project-row, .equipment-card, .safety-card, .cert-card, .about-media, .about-text, .contact-info-card, .form-card';
+
+function initScrollReveal(){
+  if(window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+  if(!revealObserver){
+    revealObserver = new IntersectionObserver((entries) => {
+      entries.forEach(entry => {
+        if(entry.isIntersecting){
+          entry.target.classList.add('reveal-visible');
+          revealObserver.unobserve(entry.target);
+        }
+      });
+    }, { threshold:0.15, rootMargin:'0px 0px -60px 0px' });
+  }
+  document.querySelectorAll(REVEAL_SELECTOR).forEach((el, i) => {
+    if(el.classList.contains('reveal-visible')) return;
+    if(!el.classList.contains('reveal')){
+      el.classList.add('reveal', 'reveal-stagger');
+      el.style.setProperty('--reveal-i', i % 8);
+    }
+    revealObserver.observe(el);
+  });
 }
 
 function initSmoothScroll(){
@@ -1640,8 +1743,8 @@ function initAboutModal(){
       </div>
       <div class="case-section">
         <h4>${isMn ? 'ТУХАЙ' : 'OVERVIEW'}</h4>
-        <p>${isMn ? settings.aboutP1Mn : translations.en.about_p1}</p>
-        <p style="margin-top:12px;">${isMn ? settings.aboutP2Mn : translations.en.about_p2}</p>
+        <p>${escapeHtml(isMn ? settings.aboutP1Mn : translations.en.about_p1)}</p>
+        <p style="margin-top:12px;">${escapeHtml(isMn ? settings.aboutP2Mn : translations.en.about_p2)}</p>
       </div>
       <div class="case-section">
         <h4>${isMn ? 'ЧАДАВХ' : 'CAPABILITY'}</h4>
@@ -1674,14 +1777,14 @@ function renderServices(){
   const grid = document.getElementById('servicesGrid');
   const isMn = currentLang === 'mn';
   grid.innerHTML = list.map(s => `
-    <div class="service-card" data-service-id="${s.id}">
+    <div class="service-card" data-service-id="${escapeHtml(s.id)}">
       <div class="service-img-wrap">
-        <img src="${s.image}" alt="${isMn ? s.titleMn : s.titleEn}" loading="lazy" onerror="handleImgError(this)">
-        <span class="service-number">${s.number}</span>
+        <img src="${isSafeUrl(s.image) ? escapeHtml(s.image) : ''}" alt="${escapeHtml(isMn ? s.titleMn : s.titleEn)}" loading="lazy" onerror="handleImgError(this)">
+        <span class="service-number">${escapeHtml(s.number)}</span>
       </div>
       <div class="service-body">
-        <div class="service-title">${isMn ? s.titleMn : s.titleEn}</div>
-        <div class="service-desc">${isMn ? s.descMn : s.descEn}</div>
+        <div class="service-title">${escapeHtml(isMn ? s.titleMn : s.titleEn)}</div>
+        <div class="service-desc">${escapeHtml(isMn ? s.descMn : s.descEn)}</div>
         <span class="service-more">${translations[currentLang].detail_btn} →</span>
       </div>
     </div>
@@ -1689,6 +1792,7 @@ function renderServices(){
   grid.querySelectorAll('.service-card').forEach(card => {
     card.addEventListener('click', () => openServiceModal(card.getAttribute('data-service-id')));
   });
+  initScrollReveal();
 }
 
 function openServiceModal(serviceId){
@@ -1698,16 +1802,16 @@ function openServiceModal(serviceId){
   const isMn = currentLang === 'mn';
   document.getElementById('serviceModalContent').innerHTML = `
     <div class="case-hero">
-      <img src="${s.image}" alt="${isMn ? s.titleMn : s.titleEn}" onerror="handleImgError(this)">
+      <img src="${isSafeUrl(s.image) ? escapeHtml(s.image) : ''}" alt="${escapeHtml(isMn ? s.titleMn : s.titleEn)}" onerror="handleImgError(this)">
     </div>
     <div class="modal-body">
-      <span class="service-number" style="position:static;display:inline-block;margin-bottom:14px;">${s.number}</span>
-      <h2 class="modal-title" style="margin-bottom:18px;">${isMn ? s.titleMn : s.titleEn}</h2>
-      <div class="case-section"><p>${isMn ? s.descMn : s.descEn}</p></div>
-      <div class="case-section"><h4>${isMn ? 'ХАМРАХ ХҮРЭЭ' : 'SCOPE OF WORK'}</h4><p>${isMn ? s.scopeMn : s.scopeEn}</p></div>
-      <div class="case-section"><h4>${isMn ? 'ИНЖЕНЕРИЙН ПРОЦЕСС' : 'ENGINEERING PROCESS'}</h4><p>${isMn ? s.processMn : s.processEn}</p></div>
-      <div class="case-section"><h4>${isMn ? 'ТЕХНИКИЙН ЧАДАВХ' : 'TECHNICAL CAPABILITY'}</h4><p>${isMn ? s.capabilityMn : s.capabilityEn}</p></div>
-      <div class="case-section"><h4>${isMn ? 'ЧАНАРЫН ХЯНАЛТ' : 'QUALITY CONTROL'}</h4><p>${isMn ? s.qcMn : s.qcEn}</p></div>
+      <span class="service-number" style="position:static;display:inline-block;margin-bottom:14px;">${escapeHtml(s.number)}</span>
+      <h2 class="modal-title" style="margin-bottom:18px;">${escapeHtml(isMn ? s.titleMn : s.titleEn)}</h2>
+      <div class="case-section"><p>${escapeHtml(isMn ? s.descMn : s.descEn)}</p></div>
+      <div class="case-section"><h4>${isMn ? 'ХАМРАХ ХҮРЭЭ' : 'SCOPE OF WORK'}</h4><p>${escapeHtml(isMn ? s.scopeMn : s.scopeEn)}</p></div>
+      <div class="case-section"><h4>${isMn ? 'ИНЖЕНЕРИЙН ПРОЦЕСС' : 'ENGINEERING PROCESS'}</h4><p>${escapeHtml(isMn ? s.processMn : s.processEn)}</p></div>
+      <div class="case-section"><h4>${isMn ? 'ТЕХНИКИЙН ЧАДАВХ' : 'TECHNICAL CAPABILITY'}</h4><p>${escapeHtml(isMn ? s.capabilityMn : s.capabilityEn)}</p></div>
+      <div class="case-section"><h4>${isMn ? 'ЧАНАРЫН ХЯНАЛТ' : 'QUALITY CONTROL'}</h4><p>${escapeHtml(isMn ? s.qcMn : s.qcEn)}</p></div>
       <button type="button" class="btn btn-primary" id="serviceModalCtaBtn">${translations[currentLang].hero_btn1}</button>
     </div>
   `;
@@ -1750,25 +1854,26 @@ function renderProjectsList(){
   wrap.innerHTML = list.map(p => `
     <div class="project-row">
       <div class="project-media">
-        <span class="project-tag">${p.workType}</span>
-        <img src="${p.heroImage}" alt="${isMn ? p.titleMn : p.titleEn}" loading="lazy" onerror="handleImgError(this)">
+        <span class="project-tag">${escapeHtml(p.workType)}</span>
+        <img src="${isSafeUrl(p.heroImage) ? escapeHtml(p.heroImage) : ''}" alt="${escapeHtml(isMn ? p.titleMn : p.titleEn)}" loading="lazy" onerror="handleImgError(this)">
       </div>
       <div class="project-info">
         <div class="project-meta">
-          <span>📍 ${p.location}</span>
-          <span>📅 ${p.year}</span>
-          <span>⌀ <strong>${p.diameter}</strong></span>
-          <span>📏 <strong>${p.length}</strong></span>
+          <span>📍 ${escapeHtml(p.location)}</span>
+          <span>📅 ${escapeHtml(p.year)}</span>
+          <span>⌀ <strong>${escapeHtml(p.diameter)}</strong></span>
+          <span>📏 <strong>${escapeHtml(p.length)}</strong></span>
         </div>
-        <div class="project-title">${isMn ? p.titleMn : p.titleEn}</div>
-        <div class="project-desc">${isMn ? p.resultMn : p.resultEn}</div>
-        <button type="button" class="btn btn-outline-dark btn-sm" data-project-id="${p.id}">${translations[currentLang].project_view_btn}</button>
+        <div class="project-title">${escapeHtml(isMn ? p.titleMn : p.titleEn)}</div>
+        <div class="project-desc">${escapeHtml(isMn ? p.resultMn : p.resultEn)}</div>
+        <button type="button" class="btn btn-outline-dark btn-sm" data-project-id="${escapeHtml(p.id)}">${translations[currentLang].project_view_btn}</button>
       </div>
     </div>
   `).join('');
   wrap.querySelectorAll('[data-project-id]').forEach(btn => {
     btn.addEventListener('click', () => openProjectModal(btn.getAttribute('data-project-id')));
   });
+  initScrollReveal();
 }
 
 function renderProjects(){
@@ -1783,46 +1888,46 @@ function openProjectModal(projectId){
   const isMn = currentLang === 'mn';
   document.getElementById('projectModalContent').innerHTML = `
     <div class="case-hero">
-      <img src="${p.heroImage}" alt="${isMn ? p.titleMn : p.titleEn}" onerror="handleImgError(this)">
+      <img src="${isSafeUrl(p.heroImage) ? escapeHtml(p.heroImage) : ''}" alt="${escapeHtml(isMn ? p.titleMn : p.titleEn)}" onerror="handleImgError(this)">
     </div>
     <div class="case-meta-bar">
-      <div class="cm"><div class="lb">${isMn ? 'БАЙРШИЛ' : 'LOCATION'}</div><div class="vl">${p.location}</div></div>
-      <div class="cm"><div class="lb">${isMn ? 'ОН' : 'YEAR'}</div><div class="vl">${p.year}</div></div>
-      <div class="cm"><div class="lb">${isMn ? 'ХООЛОЙН ТӨРӨЛ' : 'PIPE TYPE'}</div><div class="vl">${p.pipelineType}</div></div>
-      <div class="cm"><div class="lb">${isMn ? 'ДИАМЕТР' : 'DIAMETER'}</div><div class="vl">${p.diameter}</div></div>
-      <div class="cm"><div class="lb">${isMn ? 'УРТ' : 'LENGTH'}</div><div class="vl">${p.length}</div></div>
-      <div class="cm"><div class="lb">${isMn ? 'АЖЛЫН ТӨРӨЛ' : 'WORK TYPE'}</div><div class="vl">${p.workType}</div></div>
+      <div class="cm"><div class="lb">${isMn ? 'БАЙРШИЛ' : 'LOCATION'}</div><div class="vl">${escapeHtml(p.location)}</div></div>
+      <div class="cm"><div class="lb">${isMn ? 'ОН' : 'YEAR'}</div><div class="vl">${escapeHtml(p.year)}</div></div>
+      <div class="cm"><div class="lb">${isMn ? 'ХООЛОЙН ТӨРӨЛ' : 'PIPE TYPE'}</div><div class="vl">${escapeHtml(p.pipelineType)}</div></div>
+      <div class="cm"><div class="lb">${isMn ? 'ДИАМЕТР' : 'DIAMETER'}</div><div class="vl">${escapeHtml(p.diameter)}</div></div>
+      <div class="cm"><div class="lb">${isMn ? 'УРТ' : 'LENGTH'}</div><div class="vl">${escapeHtml(p.length)}</div></div>
+      <div class="cm"><div class="lb">${isMn ? 'АЖЛЫН ТӨРӨЛ' : 'WORK TYPE'}</div><div class="vl">${escapeHtml(p.workType)}</div></div>
     </div>
     <div class="modal-body">
-      <h2 class="modal-title" style="margin-bottom:24px;">${isMn ? p.titleMn : p.titleEn}</h2>
-      <div class="case-section"><h4>${isMn ? 'ТӨСЛИЙН ТУХАЙ' : 'ABOUT THE PROJECT'}</h4><p>${isMn ? p.challengeMn : p.challengeEn}</p></div>
-      <div class="case-section"><h4>${isMn ? 'ТУЛГАРСАН СОРИЛТ' : 'THE CHALLENGE'}</h4><p>${isMn ? p.challengeMn : p.challengeEn}</p></div>
-      <div class="case-section"><h4>${isMn ? 'ИНЖЕНЕРИЙН ШИЙДЭЛ' : 'ENGINEERING SOLUTION'}</h4><p>${isMn ? p.solutionMn : p.solutionEn}</p></div>
-      <div class="case-section"><h4>${isMn ? 'ГҮЙЦЭТГЭСЭН АЖИЛ' : 'SCOPE COMPLETED'}</h4><p>${isMn ? p.scopeMn : p.scopeEn}</p></div>
+      <h2 class="modal-title" style="margin-bottom:24px;">${escapeHtml(isMn ? p.titleMn : p.titleEn)}</h2>
+      <div class="case-section"><h4>${isMn ? 'ТӨСЛИЙН ТУХАЙ' : 'ABOUT THE PROJECT'}</h4><p>${escapeHtml(isMn ? p.challengeMn : p.challengeEn)}</p></div>
+      <div class="case-section"><h4>${isMn ? 'ТУЛГАРСАН СОРИЛТ' : 'THE CHALLENGE'}</h4><p>${escapeHtml(isMn ? p.challengeMn : p.challengeEn)}</p></div>
+      <div class="case-section"><h4>${isMn ? 'ИНЖЕНЕРИЙН ШИЙДЭЛ' : 'ENGINEERING SOLUTION'}</h4><p>${escapeHtml(isMn ? p.solutionMn : p.solutionEn)}</p></div>
+      <div class="case-section"><h4>${isMn ? 'ГҮЙЦЭТГЭСЭН АЖИЛ' : 'SCOPE COMPLETED'}</h4><p>${escapeHtml(isMn ? p.scopeMn : p.scopeEn)}</p></div>
       <div class="case-section">
         <h4>${isMn ? 'ТЕХНИКИЙН ҮЗҮҮЛЭЛТ' : 'TECHNICAL SPECIFICATIONS'}</h4>
         <ul>
-          <li>${isMn ? 'Хоолойн төрөл' : 'Pipe type'}: ${p.pipelineType}</li>
-          <li>${isMn ? 'Диаметр' : 'Diameter'}: ${p.diameter}</li>
-          <li>${isMn ? 'Урт' : 'Length'}: ${p.length}</li>
+          <li>${isMn ? 'Хоолойн төрөл' : 'Pipe type'}: ${escapeHtml(p.pipelineType)}</li>
+          <li>${isMn ? 'Диаметр' : 'Diameter'}: ${escapeHtml(p.diameter)}</li>
+          <li>${isMn ? 'Урт' : 'Length'}: ${escapeHtml(p.length)}</li>
         </ul>
       </div>
-      <div class="case-section"><h4>${isMn ? 'ЧАНАРЫН ХЯНАЛТ' : 'QUALITY CONTROL'}</h4><p>${isMn ? p.qualityControlMn : p.qualityControlEn}</p></div>
-      <div class="case-section"><h4>${isMn ? 'ҮР ДҮН' : 'RESULT'}</h4><p>${isMn ? p.resultMn : p.resultEn}</p></div>
+      <div class="case-section"><h4>${isMn ? 'ЧАНАРЫН ХЯНАЛТ' : 'QUALITY CONTROL'}</h4><p>${escapeHtml(isMn ? p.qualityControlMn : p.qualityControlEn)}</p></div>
+      <div class="case-section"><h4>${isMn ? 'ҮР ДҮН' : 'RESULT'}</h4><p>${escapeHtml(isMn ? p.resultMn : p.resultEn)}</p></div>
       <div class="case-section">
         <h4>${isMn ? 'ӨМНӨ / ХОЙНО' : 'BEFORE / AFTER'}</h4>
         <div class="ba-slider" id="baSlider">
           <span class="ba-label before">${isMn ? 'ӨМНӨ' : 'BEFORE'}</span>
           <span class="ba-label after">${isMn ? 'ХОЙНО' : 'AFTER'}</span>
-          <img src="${p.beforeImage}" alt="Before" onerror="handleImgError(this)">
-          <div class="ba-after-wrap" id="baAfterWrap"><img src="${p.afterImage}" alt="After" onerror="handleImgError(this)"></div>
+          <img src="${isSafeUrl(p.beforeImage) ? escapeHtml(p.beforeImage) : ''}" alt="Before" onerror="handleImgError(this)">
+          <div class="ba-after-wrap" id="baAfterWrap"><img src="${isSafeUrl(p.afterImage) ? escapeHtml(p.afterImage) : ''}" alt="After" onerror="handleImgError(this)"></div>
           <div class="ba-handle" id="baHandle"></div>
         </div>
       </div>
       <div class="case-section">
         <h4>${isMn ? 'ЗУРГИЙН ЦОМОГ' : 'GALLERY'}</h4>
         <div class="case-gallery">
-          ${p.gallery.map(g => `<img src="${g}" alt="Project gallery" loading="lazy" onerror="handleImgError(this)">`).join('')}
+          ${p.gallery.map(g => `<img src="${isSafeUrl(g) ? escapeHtml(g) : ''}" alt="Project gallery" loading="lazy" onerror="handleImgError(this)">`).join('')}
         </div>
       </div>
     </div>
@@ -1831,7 +1936,14 @@ function openProjectModal(projectId){
   openModal('modal-project');
 }
 
+// Tracks the previously bound window-level listeners so re-opening the
+// project modal doesn't stack up an unbounded number of mousemove/mouseup
+// (or pointermove/pointerup) handlers on window across repeated views.
+let baSliderCleanup = null;
+
 function initBeforeAfterSlider(){
+  if(baSliderCleanup){ baSliderCleanup(); baSliderCleanup = null; }
+
   const slider = document.getElementById('baSlider');
   const afterWrap = document.getElementById('baAfterWrap');
   const handle = document.getElementById('baHandle');
@@ -1861,15 +1973,29 @@ function initBeforeAfterSlider(){
   }
   function onUp(){ dragging = false; }
 
-  slider.addEventListener('mousedown', onDown);
-  window.addEventListener('mousemove', onMove);
-  window.addEventListener('mouseup', onUp);
-  slider.addEventListener('touchstart', onDown, { passive:true });
-  slider.addEventListener('touchmove', onMove, { passive:true });
-  slider.addEventListener('touchend', onUp);
-  slider.addEventListener('pointerdown', onDown);
-  slider.addEventListener('pointermove', onMove);
-  slider.addEventListener('pointerup', onUp);
+  // Pointer events alone cover mouse, touch, and pen input in all evergreen
+  // browsers. Only fall back to separate mouse/touch listeners when the
+  // Pointer Events API isn't available, to avoid double-firing setPosition.
+  if(window.PointerEvent){
+    slider.addEventListener('pointerdown', onDown);
+    window.addEventListener('pointermove', onMove);
+    window.addEventListener('pointerup', onUp);
+    baSliderCleanup = () => {
+      window.removeEventListener('pointermove', onMove);
+      window.removeEventListener('pointerup', onUp);
+    };
+  } else {
+    slider.addEventListener('mousedown', onDown);
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
+    slider.addEventListener('touchstart', onDown, { passive:true });
+    slider.addEventListener('touchmove', onMove, { passive:true });
+    slider.addEventListener('touchend', onUp);
+    baSliderCleanup = () => {
+      window.removeEventListener('mousemove', onMove);
+      window.removeEventListener('mouseup', onUp);
+    };
+  }
 
   requestAnimationFrame(() => {
     const rect = slider.getBoundingClientRect();
@@ -1917,15 +2043,16 @@ function renderEquipmentGrid(){
   }
   grid.innerHTML = list.map(e => `
     <div class="equipment-card">
-      <div class="equipment-img"><img src="${e.image}" alt="${isMn ? e.nameMn : e.nameEn}" loading="lazy" onerror="handleImgError(this)"></div>
+      <div class="equipment-img"><img src="${isSafeUrl(e.image) ? escapeHtml(e.image) : ''}" alt="${escapeHtml(isMn ? e.nameMn : e.nameEn)}" loading="lazy" onerror="handleImgError(this)"></div>
       <div class="equipment-body">
-        <div class="equipment-cat">${dict[catLabelKey[e.category]] || e.category}</div>
-        <div class="equipment-name">${isMn ? e.nameMn : e.nameEn}</div>
-        <div class="equipment-desc">${isMn ? e.descMn : e.descEn}</div>
-        <div class="equipment-spec">${isMn ? e.specMn : e.specEn}</div>
+        <div class="equipment-cat">${escapeHtml(dict[catLabelKey[e.category]] || e.category)}</div>
+        <div class="equipment-name">${escapeHtml(isMn ? e.nameMn : e.nameEn)}</div>
+        <div class="equipment-desc">${escapeHtml(isMn ? e.descMn : e.descEn)}</div>
+        <div class="equipment-spec">${escapeHtml(isMn ? e.specMn : e.specEn)}</div>
       </div>
     </div>
   `).join('');
+  initScrollReveal();
 }
 
 function renderEquipment(){
@@ -1953,6 +2080,7 @@ function renderSafety(){
       <p>${isMn ? it.descMn : it.descEn}</p>
     </div>
   `).join('');
+  initScrollReveal();
 }
 
 /* =====================================================================
@@ -1968,11 +2096,12 @@ function renderCertificates(){
   }
   wrap.innerHTML = `<div class="cert-grid">${certs.map(c => `
     <div class="cert-card">
-      ${c.image ? `<img src="${c.image}" alt="${isMn ? c.titleMn : c.titleEn}" loading="lazy" onerror="handleImgError(this)" style="height:120px;object-fit:contain;margin:0 auto 14px;">` : ''}
-      <div style="font-weight:800;color:var(--navy-dark);font-size:14px;margin-bottom:6px;">${isMn ? c.titleMn : c.titleEn}</div>
-      <div style="font-size:12.5px;color:#5a6b7b;">${c.issuer || ''}</div>
+      ${isSafeUrl(c.image) ? `<img src="${escapeHtml(c.image)}" alt="${escapeHtml(isMn ? c.titleMn : c.titleEn)}" loading="lazy" onerror="handleImgError(this)" style="height:120px;object-fit:contain;margin:0 auto 14px;">` : ''}
+      <div style="font-weight:800;color:var(--navy-dark);font-size:14px;margin-bottom:6px;">${escapeHtml(isMn ? c.titleMn : c.titleEn)}</div>
+      <div style="font-size:12.5px;color:#5a6b7b;">${escapeHtml(c.issuer) || ''}</div>
     </div>
   `).join('')}</div>`;
+  initScrollReveal();
 }
 
 /* =====================================================================
@@ -2070,7 +2199,7 @@ function validateWizardStep(step){
 
 function renderReview(){
   const isMn = currentLang === 'mn';
-  const val = id => document.getElementById(id).value || '—';
+  const val = id => escapeHtml(document.getElementById(id).value) || '—';
   const reviewHtml = `
     <div class="review-block">
       <div class="rb-title">${isMn ? 'КОМПАНИЙН МЭДЭЭЛЭЛ' : 'COMPANY INFORMATION'} <button type="button" class="rb-edit" data-goto="1">${isMn ? 'ЗАСАХ' : 'EDIT'}</button></div>
@@ -2095,7 +2224,7 @@ function renderReview(){
     <div class="review-block" style="border-bottom:none;">
       <div class="rb-title">${isMn ? 'ХАВСАРГАСАН ФАЙЛ' : 'ATTACHED FILES'} <button type="button" class="rb-edit" data-goto="4">${isMn ? 'ЗАСАХ' : 'EDIT'}</button></div>
       ${wizardState.files.length === 0 ? `<div class="review-row"><span>${isMn ? 'Файл алга' : 'No files'}</span><span></span></div>` :
-        wizardState.files.map(f => `<div class="review-row"><span>${f.name}</span><span>${(f.size/1024).toFixed(0)} KB</span></div>`).join('')}
+        wizardState.files.map(f => `<div class="review-row"><span>${escapeHtml(f.name)}</span><span>${(f.size/1024).toFixed(0)} KB</span></div>`).join('')}
     </div>
   `;
   document.getElementById('reviewContent').innerHTML = reviewHtml;
@@ -2192,7 +2321,7 @@ function renderFileList(){
   const wrap = document.getElementById('fileList');
   wrap.innerHTML = wizardState.files.map((f,i) => `
     <div class="file-item">
-      <div><span class="fname">${f.name}</span><span class="fsize">${(f.size/1024).toFixed(0)} KB</span></div>
+      <div><span class="fname">${escapeHtml(f.name)}</span><span class="fsize">${(f.size/1024).toFixed(0)} KB</span></div>
       <button type="button" class="file-remove" data-remove-idx="${i}" aria-label="Remove file">&times;</button>
     </div>
   `).join('');
@@ -2218,12 +2347,15 @@ function renderContactInfo(){
   document.getElementById('footerPhone').textContent = s.companyPhone;
   document.getElementById('footerEmail').textContent = s.companyEmail;
   document.getElementById('footerAddress').textContent = s.companyAddress;
+  const safeHref = url => isSafeUrl(url) ? escapeHtml(url) : '#';
   document.getElementById('socialRow').innerHTML = `
-    <a href="${s.facebookUrl}" target="_blank" rel="noopener noreferrer" aria-label="Facebook">f</a>
-    <a href="${s.instagramUrl}" target="_blank" rel="noopener noreferrer" aria-label="Instagram">ig</a>
-    <a href="${s.linkedinUrl}" target="_blank" rel="noopener noreferrer" aria-label="LinkedIn">in</a>
+    <a href="${safeHref(s.facebookUrl)}" target="_blank" rel="noopener noreferrer" aria-label="Facebook">f</a>
+    <a href="${safeHref(s.instagramUrl)}" target="_blank" rel="noopener noreferrer" aria-label="Instagram">ig</a>
+    <a href="${safeHref(s.linkedinUrl)}" target="_blank" rel="noopener noreferrer" aria-label="LinkedIn">in</a>
   `;
-  document.getElementById('openMapBtn').onclick = () => window.open(s.googleMapsUrl, '_blank', 'noopener,noreferrer');
+  document.getElementById('openMapBtn').onclick = () => {
+    if(isSafeUrl(s.googleMapsUrl)) window.open(s.googleMapsUrl, '_blank', 'noopener,noreferrer');
+  };
 }
 
 function renderFooterServices(){
@@ -2395,8 +2527,8 @@ function renderAdminDashboardView(){
           <tbody>
             ${recentRequests.length ? recentRequests.map(r => `
               <tr>
-                <td>${r.requestId}</td><td>${r.companyName}</td><td>${r.workType}</td><td>${fmtDate(r.createdAt)}</td>
-                <td><span class="status-pill status-${r.status}">${r.status}</span></td>
+                <td>${escapeHtml(r.requestId)}</td><td>${escapeHtml(r.companyName)}</td><td>${escapeHtml(r.workType)}</td><td>${fmtDate(r.createdAt)}</td>
+                <td><span class="status-pill status-${escapeHtml(r.status)}">${escapeHtml(r.status)}</span></td>
               </tr>`).join('') : `<tr><td colspan="5" style="text-align:center;color:#8a97a4;">Хүсэлт алга байна</td></tr>`}
           </tbody>
         </table>
@@ -2409,7 +2541,7 @@ function renderAdminDashboardView(){
           <thead><tr><th>Нэр</th><th>Утас</th><th>И-мэйл</th><th>Огноо</th></tr></thead>
           <tbody>
             ${recentMessages.length ? recentMessages.map(m => `
-              <tr><td>${m.name}</td><td>${m.phone}</td><td>${m.email}</td><td>${fmtDate(m.createdAt)}</td></tr>`).join('') : `<tr><td colspan="4" style="text-align:center;color:#8a97a4;">Мессеж алга байна</td></tr>`}
+              <tr><td>${escapeHtml(m.name)}</td><td>${escapeHtml(m.phone)}</td><td>${escapeHtml(m.email)}</td><td>${fmtDate(m.createdAt)}</td></tr>`).join('') : `<tr><td colspan="4" style="text-align:center;color:#8a97a4;">Мессеж алга байна</td></tr>`}
           </tbody>
         </table>
       </div>
@@ -2434,12 +2566,12 @@ function renderAdminRequestsView(){
           <tbody>
             ${requests.length ? requests.map(r => `
               <tr>
-                <td>${r.requestId}</td><td>${r.companyName}</td><td>${r.contactPerson}</td><td>${r.phone}</td>
-                <td>${r.workType}</td><td>${r.location}</td><td>${fmtDate(r.createdAt)}</td>
-                <td><span class="status-pill status-${r.status}">${r.status}</span></td>
+                <td>${escapeHtml(r.requestId)}</td><td>${escapeHtml(r.companyName)}</td><td>${escapeHtml(r.contactPerson)}</td><td>${escapeHtml(r.phone)}</td>
+                <td>${escapeHtml(r.workType)}</td><td>${escapeHtml(r.location)}</td><td>${fmtDate(r.createdAt)}</td>
+                <td><span class="status-pill status-${escapeHtml(r.status)}">${escapeHtml(r.status)}</span></td>
                 <td>
-                  <button type="button" class="icon-btn" data-open-request="${r.requestId}" aria-label="Open">👁</button>
-                  <button type="button" class="icon-btn danger" data-delete-request="${r.requestId}" aria-label="Delete">🗑</button>
+                  <button type="button" class="icon-btn" data-open-request="${escapeHtml(r.requestId)}" aria-label="Open">👁</button>
+                  <button type="button" class="icon-btn danger" data-delete-request="${escapeHtml(r.requestId)}" aria-label="Delete">🗑</button>
                 </td>
               </tr>`).join('') : `<tr><td colspan="9" style="text-align:center;color:#8a97a4;">Хүсэлт алга байна</td></tr>`}
           </tbody>
@@ -2471,21 +2603,21 @@ function openRequestDetail(requestId){
   document.getElementById('reqDetailTitle').textContent = r.requestId;
   document.getElementById('reqDetailBody').innerHTML = `
     <div class="detail-grid">
-      <div><strong>Компани:</strong> ${r.companyName}</div>
-      <div><strong>Холбоо барих:</strong> ${r.contactPerson}</div>
-      <div><strong>Утас:</strong> ${r.phone}</div>
-      <div><strong>И-мэйл:</strong> ${r.email}</div>
-      <div><strong>Байршил:</strong> ${r.location}</div>
-      <div><strong>Ажлын төрөл:</strong> ${r.workType}</div>
-      <div><strong>Хоолойн төрөл:</strong> ${r.pipeType || '—'}</div>
-      <div><strong>Диаметр:</strong> ${r.diameter || '—'}</div>
-      <div><strong>Урт:</strong> ${r.pipelineLength || '—'}</div>
-      <div><strong>Эхлэх огноо:</strong> ${r.startDate || '—'}</div>
+      <div><strong>Компани:</strong> ${escapeHtml(r.companyName)}</div>
+      <div><strong>Холбоо барих:</strong> ${escapeHtml(r.contactPerson)}</div>
+      <div><strong>Утас:</strong> ${escapeHtml(r.phone)}</div>
+      <div><strong>И-мэйл:</strong> ${escapeHtml(r.email)}</div>
+      <div><strong>Байршил:</strong> ${escapeHtml(r.location)}</div>
+      <div><strong>Ажлын төрөл:</strong> ${escapeHtml(r.workType)}</div>
+      <div><strong>Хоолойн төрөл:</strong> ${escapeHtml(r.pipeType) || '—'}</div>
+      <div><strong>Диаметр:</strong> ${escapeHtml(r.diameter) || '—'}</div>
+      <div><strong>Урт:</strong> ${escapeHtml(r.pipelineLength) || '—'}</div>
+      <div><strong>Эхлэх огноо:</strong> ${escapeHtml(r.startDate) || '—'}</div>
     </div>
-    <div class="case-section"><h4>ТАЙЛБАР</h4><p>${r.description || '—'}</p></div>
+    <div class="case-section"><h4>ТАЙЛБАР</h4><p>${escapeHtml(r.description) || '—'}</p></div>
     <div class="case-section">
       <h4>ХАВСАРГАСАН ФАЙЛ</h4>
-      ${r.files && r.files.length ? r.files.map(f => `<div class="review-row"><span>${f.name}</span><span>${(f.size/1024).toFixed(0)} KB</span></div>`).join('') : '<p>Файл алга байна.</p>'}
+      ${r.files && r.files.length ? r.files.map(f => `<div class="review-row"><span>${escapeHtml(f.name)}</span><span>${(f.size/1024).toFixed(0)} KB</span></div>`).join('') : '<p>Файл алга байна.</p>'}
     </div>
     <div class="case-section">
       <h4>ТӨЛӨВ ӨӨРЧЛӨХ</h4>
@@ -2499,7 +2631,7 @@ function openRequestDetail(requestId){
     <div class="case-section">
       <h4>ДОТООД ТЭМДЭГЛЭЛ</h4>
       <div id="reqNotesList">
-        ${(r.internalNotes||[]).map(n => `<div class="note-item">${n.text}<div class="nd">${fmtDate(n.date)}</div></div>`).join('') || '<p style="color:#8a97a4;">Тэмдэглэл алга байна.</p>'}
+        ${(r.internalNotes||[]).map(n => `<div class="note-item">${escapeHtml(n.text)}<div class="nd">${fmtDate(n.date)}</div></div>`).join('') || '<p style="color:#8a97a4;">Тэмдэглэл алга байна.</p>'}
       </div>
       <div class="form-row" style="margin-top:14px;">
         <input type="text" class="form-control" id="reqNoteInput" placeholder="Тэмдэглэл нэмэх...">
@@ -2509,7 +2641,7 @@ function openRequestDetail(requestId){
     <div class="case-section">
       <h4>ҮЙЛ АЖИЛЛАГААНЫ ТҮҮХ</h4>
       <div class="activity-timeline">
-        ${(r.activity||[]).map(a => `<div class="activity-item"><div><div class="at">${a.text}</div><div class="ad">${fmtDate(a.date)}</div></div></div>`).join('')}
+        ${(r.activity||[]).map(a => `<div class="activity-item"><div><div class="at">${escapeHtml(a.text)}</div><div class="ad">${fmtDate(a.date)}</div></div></div>`).join('')}
       </div>
     </div>
   `;
@@ -2562,9 +2694,9 @@ function renderAdminMessagesView(){
           <tbody>
             ${messages.length ? messages.map(m => `
               <tr>
-                <td>${m.name}</td><td>${m.company || '—'}</td><td>${m.phone}</td><td>${m.email}</td>
-                <td style="max-width:220px;white-space:normal;">${m.message}</td><td>${fmtDate(m.createdAt)}</td>
-                <td><button type="button" class="icon-btn danger" data-delete-message="${m.id}" aria-label="Delete">🗑</button></td>
+                <td>${escapeHtml(m.name)}</td><td>${escapeHtml(m.company) || '—'}</td><td>${escapeHtml(m.phone)}</td><td>${escapeHtml(m.email)}</td>
+                <td style="max-width:220px;white-space:normal;">${escapeHtml(m.message)}</td><td>${fmtDate(m.createdAt)}</td>
+                <td><button type="button" class="icon-btn danger" data-delete-message="${escapeHtml(m.id)}" aria-label="Delete">🗑</button></td>
               </tr>`).join('') : `<tr><td colspan="7" style="text-align:center;color:#8a97a4;">Мессеж алга байна</td></tr>`}
           </tbody>
         </table>
@@ -2707,9 +2839,9 @@ function openEntityEditor(type, id){
       return `<div class="form-group" style="${widthStyle}"><label>${f.label}</label><select class="form-control" id="ef_${f.key}">${f.options.map(([v,l]) => `<option value="${v}" ${v===val?'selected':''}>${l}</option>`).join('')}</select></div>`;
     }
     if(f.type === 'textarea'){
-      return `<div class="form-group" style="${widthStyle}"><label>${f.label}</label><textarea class="form-control" id="ef_${f.key}">${val || ''}</textarea></div>`;
+      return `<div class="form-group" style="${widthStyle}"><label>${f.label}</label><textarea class="form-control" id="ef_${f.key}">${escapeHtml(val)}</textarea></div>`;
     }
-    return `<div class="form-group" style="${widthStyle}"><label>${f.label}</label><input type="${f.type}" class="form-control" id="ef_${f.key}" value="${(val !== undefined && val !== null) ? String(val).replace(/"/g,'&quot;') : ''}"></div>`;
+    return `<div class="form-group" style="${widthStyle}"><label>${f.label}</label><input type="${f.type}" class="form-control" id="ef_${f.key}" value="${escapeHtml(val)}"></div>`;
   }).join('');
   document.getElementById('editorBody').innerHTML = `
     <div class="form-row" style="display:grid;grid-template-columns:1fr 1fr;gap:18px;">${fieldsHtml}</div>
@@ -2802,10 +2934,10 @@ function renderEntityAdminList(type, viewId, opts){
       <div class="admin-card-list">
         ${list.length ? list.map(item => `
           <div class="admin-item-row">
-            ${imgOf(item) ? `<img src="${imgOf(item)}" alt="${nameOf(item)}" onerror="handleImgError(this)">` : ''}
+            ${isSafeUrl(imgOf(item)) ? `<img src="${escapeHtml(imgOf(item))}" alt="${escapeHtml(nameOf(item))}" onerror="handleImgError(this)">` : ''}
             <div class="info">
-              <div class="t">${nameOf(item)} ${item.published === false ? '<span class="pub-pill pub-no">UNPUBLISHED</span>' : '<span class="pub-pill pub-yes">PUBLISHED</span>'} ${item.featured ? '<span class="feat-pill">FEATURED</span>' : ''}</div>
-              <div class="s">${subOf(item)}</div>
+              <div class="t">${escapeHtml(nameOf(item))} ${item.published === false ? '<span class="pub-pill pub-no">UNPUBLISHED</span>' : '<span class="pub-pill pub-yes">PUBLISHED</span>'} ${item.featured ? '<span class="feat-pill">FEATURED</span>' : ''}</div>
+              <div class="s">${escapeHtml(subOf(item))}</div>
             </div>
             <div class="actions">
               ${opts.moveable ? `<button type="button" class="icon-btn" data-move="up" data-id="${item.id}">↑</button><button type="button" class="icon-btn" data-move="down" data-id="${item.id}">↓</button>` : ''}
@@ -2855,10 +2987,10 @@ function renderAdminContentView(){
 
     <div class="admin-panel">
       <div class="admin-panel-head"><h3>Hero &amp; Бидний тухай</h3></div>
-      <div class="form-group"><label>Hero гарчиг (HTML зөвшөөрөгдөнө)</label><textarea class="form-control" id="ctHeroTitle">${s.heroTitleMn}</textarea></div>
-      <div class="form-group"><label>Hero тайлбар</label><textarea class="form-control" id="ctHeroDesc">${s.heroDescMn}</textarea></div>
-      <div class="form-group"><label>Бидний тухай - параграф 1</label><textarea class="form-control" id="ctAboutP1">${s.aboutP1Mn}</textarea></div>
-      <div class="form-group"><label>Бидний тухай - параграф 2</label><textarea class="form-control" id="ctAboutP2">${s.aboutP2Mn}</textarea></div>
+      <div class="form-group"><label>Hero гарчиг (HTML зөвшөөрөгдөнө)</label><textarea class="form-control" id="ctHeroTitle">${escapeHtml(s.heroTitleMn)}</textarea></div>
+      <div class="form-group"><label>Hero тайлбар</label><textarea class="form-control" id="ctHeroDesc">${escapeHtml(s.heroDescMn)}</textarea></div>
+      <div class="form-group"><label>Бидний тухай - параграф 1</label><textarea class="form-control" id="ctAboutP1">${escapeHtml(s.aboutP1Mn)}</textarea></div>
+      <div class="form-group"><label>Бидний тухай - параграф 2</label><textarea class="form-control" id="ctAboutP2">${escapeHtml(s.aboutP2Mn)}</textarea></div>
       <button type="button" class="btn btn-primary" id="ctSaveHeroBtn">ХАДГАЛАХ</button>
     </div>
 
@@ -2866,10 +2998,10 @@ function renderAdminContentView(){
       <div class="admin-panel-head"><h3>Статистик</h3></div>
       ${stats.map((st,i) => `
         <div class="form-row" style="margin-bottom:12px;">
-          <div class="form-group"><label>Утга</label><input type="number" class="form-control" id="ctStatVal${i}" value="${st.value}"></div>
-          <div class="form-group"><label>Тэмдэг</label><input type="text" class="form-control" id="ctStatSuffix${i}" value="${st.suffix}"></div>
-          <div class="form-group"><label>Гарчиг (MN)</label><input type="text" class="form-control" id="ctStatMn${i}" value="${st.labelMn}"></div>
-          <div class="form-group"><label>Гарчиг (EN)</label><input type="text" class="form-control" id="ctStatEn${i}" value="${st.labelEn}"></div>
+          <div class="form-group"><label>Утга</label><input type="number" class="form-control" id="ctStatVal${i}" value="${escapeHtml(st.value)}"></div>
+          <div class="form-group"><label>Тэмдэг</label><input type="text" class="form-control" id="ctStatSuffix${i}" value="${escapeHtml(st.suffix)}"></div>
+          <div class="form-group"><label>Гарчиг (MN)</label><input type="text" class="form-control" id="ctStatMn${i}" value="${escapeHtml(st.labelMn)}"></div>
+          <div class="form-group"><label>Гарчиг (EN)</label><input type="text" class="form-control" id="ctStatEn${i}" value="${escapeHtml(st.labelEn)}"></div>
         </div>
       `).join('')}
       <button type="button" class="btn btn-primary" id="ctSaveStatsBtn">ХАДГАЛАХ</button>
@@ -2878,30 +3010,30 @@ function renderAdminContentView(){
     <div class="admin-panel">
       <div class="admin-panel-head"><h3>Компанийн мэдээлэл</h3></div>
       <div class="form-row">
-        <div class="form-group"><label>Утас</label><input type="text" class="form-control" id="ctPhone" value="${s.companyPhone}"></div>
-        <div class="form-group"><label>Төслийн утас</label><input type="text" class="form-control" id="ctProjectPhone" value="${s.projectPhone}"></div>
+        <div class="form-group"><label>Утас</label><input type="text" class="form-control" id="ctPhone" value="${escapeHtml(s.companyPhone)}"></div>
+        <div class="form-group"><label>Төслийн утас</label><input type="text" class="form-control" id="ctProjectPhone" value="${escapeHtml(s.projectPhone)}"></div>
       </div>
       <div class="form-row">
-        <div class="form-group"><label>И-мэйл</label><input type="text" class="form-control" id="ctEmail" value="${s.companyEmail}"></div>
-        <div class="form-group"><label>Ажлын цаг</label><input type="text" class="form-control" id="ctHours" value="${s.workingHours}"></div>
+        <div class="form-group"><label>И-мэйл</label><input type="text" class="form-control" id="ctEmail" value="${escapeHtml(s.companyEmail)}"></div>
+        <div class="form-group"><label>Ажлын цаг</label><input type="text" class="form-control" id="ctHours" value="${escapeHtml(s.workingHours)}"></div>
       </div>
-      <div class="form-group"><label>Хаяг</label><input type="text" class="form-control" id="ctAddress" value="${s.companyAddress}"></div>
+      <div class="form-group"><label>Хаяг</label><input type="text" class="form-control" id="ctAddress" value="${escapeHtml(s.companyAddress)}"></div>
       <div class="form-row">
-        <div class="form-group"><label>Facebook URL</label><input type="text" class="form-control" id="ctFacebook" value="${s.facebookUrl}"></div>
-        <div class="form-group"><label>Instagram URL</label><input type="text" class="form-control" id="ctInstagram" value="${s.instagramUrl}"></div>
+        <div class="form-group"><label>Facebook URL</label><input type="text" class="form-control" id="ctFacebook" value="${escapeHtml(s.facebookUrl)}"></div>
+        <div class="form-group"><label>Instagram URL</label><input type="text" class="form-control" id="ctInstagram" value="${escapeHtml(s.instagramUrl)}"></div>
       </div>
       <div class="form-row">
-        <div class="form-group"><label>LinkedIn URL</label><input type="text" class="form-control" id="ctLinkedin" value="${s.linkedinUrl}"></div>
-        <div class="form-group"><label>Google Maps URL</label><input type="text" class="form-control" id="ctMapsUrl" value="${s.googleMapsUrl}"></div>
+        <div class="form-group"><label>LinkedIn URL</label><input type="text" class="form-control" id="ctLinkedin" value="${escapeHtml(s.linkedinUrl)}"></div>
+        <div class="form-group"><label>Google Maps URL</label><input type="text" class="form-control" id="ctMapsUrl" value="${escapeHtml(s.googleMapsUrl)}"></div>
       </div>
-      <div class="form-group"><label>Хөлийн хэсгийн тайлбар</label><textarea class="form-control" id="ctFooterDesc">${s.footerDesc}</textarea></div>
+      <div class="form-group"><label>Хөлийн хэсгийн тайлбар</label><textarea class="form-control" id="ctFooterDesc">${escapeHtml(s.footerDesc)}</textarea></div>
       <button type="button" class="btn btn-primary" id="ctSaveCompanyBtn">ХАДГАЛАХ</button>
     </div>
 
     <div class="admin-panel">
       <div class="admin-panel-head"><h3>SEO</h3></div>
-      <div class="form-group"><label>SEO гарчиг</label><input type="text" class="form-control" id="ctSeoTitle" value="${s.seoTitle}"></div>
-      <div class="form-group"><label>SEO тайлбар</label><textarea class="form-control" id="ctSeoDesc">${s.seoDescription}</textarea></div>
+      <div class="form-group"><label>SEO гарчиг</label><input type="text" class="form-control" id="ctSeoTitle" value="${escapeHtml(s.seoTitle)}"></div>
+      <div class="form-group"><label>SEO тайлбар</label><textarea class="form-control" id="ctSeoDesc">${escapeHtml(s.seoDescription)}</textarea></div>
       <button type="button" class="btn btn-primary" id="ctSaveSeoBtn">ХАДГАЛАХ</button>
     </div>
   `;
@@ -3015,6 +3147,7 @@ document.addEventListener('DOMContentLoaded', () => {
   initAdminAuth();
   initAdminSidebar();
   initConfirmDialog();
+  initScrollReveal();
 });
 </script>
 </body>
