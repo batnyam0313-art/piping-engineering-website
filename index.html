@@ -999,16 +999,15 @@ table.admin-table tr:hover td{background:var(--gray-light);}
 const COMPANY_LOGO = "assets/logo.png";
 
 // SUPABASE BACKEND CONFIGURATION.
-// Fill these in after creating your Supabase project (see README.md).
-// The "anon" key below is a PUBLIC key by design -- it is meant to be
-// visible in client-side code. It grants only what the Row Level Security
-// policies in supabase/schema.sql allow (e.g. visitors can submit a project
-// request but cannot read anyone else's). Real access control lives in the
-// database policies, not in keeping this key secret. Never put your Supabase
+// This is a PUBLIC (publishable) key by design -- it is meant to be visible
+// in client-side code. It grants only what the Row Level Security policies
+// in supabase/schema.sql allow (e.g. visitors can submit a project request
+// but cannot read anyone else's). Real access control lives in the database
+// policies, not in keeping this key secret. Never put a Supabase
 // service_role key or database password here or anywhere in this file --
 // those are the actual secrets and must never reach the browser.
-const SUPABASE_URL = "https://YOUR-PROJECT-REF.supabase.co";
-const SUPABASE_ANON_KEY = "YOUR-PUBLIC-ANON-KEY";
+const SUPABASE_URL = "https://euncxsudjrapofzxniiz.supabase.co";
+const SUPABASE_ANON_KEY = "sb_publishable_ocF_rUfBh3znoSi8hv6pDg_Ljec9vzP";
 
 const sb = (typeof supabase !== 'undefined' && SUPABASE_URL.indexOf('YOUR-PROJECT-REF') === -1)
   ? supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY)

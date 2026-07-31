@@ -5,57 +5,45 @@ supply pipeline engineering company, with a real backend (Supabase: Postgres
 database + authentication) for project requests, contact messages, and all
 admin-managed content.
 
-Until the backend is connected, the site still opens and displays normally
-using the bundled example content — but submitting a request/message or
-using the admin panel requires the backend to be set up first.
+## Backend status: connected
 
-## Setting up the backend (one-time, ~10 minutes)
+The site is already wired up to a live Supabase project
+(`euncxsudjrapofzxniiz`) — `SUPABASE_URL` and `SUPABASE_ANON_KEY` in
+`index.html` point at it, and `supabase/schema.sql` has been applied (every
+table exists with Row Level Security policies active: visitors can submit a
+project request or contact message and read published public content;
+nothing else). The database advisor was run after setup and comes back
+clean of exploitable issues.
 
-### 1. Create a Supabase project
+The same example content that was bundled as the offline fallback (8
+services, 6 example projects, 7 equipment items) has also been seeded into
+the live database, so the site looks complete right away — edit or replace
+any of it from the admin panel once you're logged in.
 
-1. Go to [supabase.com](https://supabase.com) and sign up (free tier is enough).
-2. Click **New Project**. Pick any name/region/database password (save that
-   password somewhere safe — it's separate from the site's admin login).
-3. Wait ~2 minutes for the project to finish provisioning.
+**One remaining manual step — create your admin login:**
 
-### 2. Run the database schema
-
-1. In your new project, open **SQL Editor** (left sidebar) → **New query**.
-2. Open `supabase/schema.sql` from this repository, copy its entire contents,
-   paste into the SQL editor, and click **Run**.
-3. This creates every table the site needs (project requests, contact
-   messages, services, projects, equipment, certificates, team, company
-   settings) with Row Level Security policies already configured:
-   - Site visitors can submit a project request or a contact message, and
-     read published public content — nothing else.
-   - Only a signed-in admin can read/write everything.
-
-### 3. Create the admin login
-
-1. Go to **Authentication → Users** (left sidebar) → **Add user**.
+1. In the [Supabase dashboard](https://supabase.com/dashboard/project/euncxsudjrapofzxniiz),
+   go to **Authentication → Users** → **Add user**.
 2. Enter the email and password you want to use to log into the site's admin
-   panel, and create the user. (Leave "Auto Confirm User" checked so it's
-   ready to use immediately.)
-3. This is now your real admin login — there is no password stored anywhere
-   in the site's code.
+   panel (footer → **ADMIN**), and create the user. Leave "Auto Confirm User"
+   checked so it's ready to use immediately.
+3. This is your real admin login — there is no password stored anywhere in
+   the site's code. (This step can't be done for you here since it needs an
+   agent tool for creating Supabase Auth users, which isn't available in this
+   session — everything else has been set up already.)
 
-### 4. Connect the site to your project
-
-1. In Supabase, go to **Project Settings → Data API** (or **API** on older
-   projects). Copy the **Project URL** and the **anon / public** key.
-   (The anon key is meant to be public — it's safe to put in client-side
-   code. Never use the `service_role` key here; that one is a real secret.)
-2. Open `index.html` in this repository and find this block near the top of
-   the `<script>` section:
-   ```js
-   const SUPABASE_URL = "https://YOUR-PROJECT-REF.supabase.co";
-   const SUPABASE_ANON_KEY = "YOUR-PUBLIC-ANON-KEY";
-   ```
-3. Replace both values with what you copied, save, and redeploy/refresh the
-   site.
-
-That's it — the site now talks to your real database. Log into the admin
-panel (footer → **ADMIN**) with the email/password you created in step 3.
+If you ever need to point the site at a *different* Supabase project (e.g.
+for a fresh environment), the config block is near the top of the
+`<script>` section in `index.html`:
+```js
+const SUPABASE_URL = "https://euncxsudjrapofzxniiz.supabase.co";
+const SUPABASE_ANON_KEY = "sb_publishable_...";
+```
+Get the values from **Project Settings → Data API** in that project, and
+re-run `supabase/schema.sql` against it first (SQL Editor → New query → paste
+→ Run). The anon/publishable key is meant to be public — safe to commit in
+client-side code. Never put a `service_role` key or database password here;
+those are the actual secrets.
 
 ## What's still client-side only
 
