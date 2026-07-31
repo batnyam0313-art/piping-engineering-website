@@ -652,26 +652,26 @@ table.admin-table tr:hover td{background:var(--gray-light);}
       <form class="form-card" id="contactForm" novalidate>
         <div class="form-group">
           <label data-i18n="cf_name">Нэр</label>
-          <input type="text" class="form-control" id="cfName" required>
+          <input type="text" class="form-control" id="cfName" maxlength="120" required>
           <div class="form-error" id="cfNameErr">Нэрээ оруулна уу.</div>
         </div>
         <div class="form-group">
           <label data-i18n="cf_company">Компанийн нэр</label>
-          <input type="text" class="form-control" id="cfCompany">
+          <input type="text" class="form-control" id="cfCompany" maxlength="160">
         </div>
         <div class="form-group">
           <label data-i18n="cf_phone">Утас</label>
-          <input type="text" class="form-control" id="cfPhone" required>
-          <div class="form-error" id="cfPhoneErr">Утасны дугаараа оруулна уу.</div>
+          <input type="text" class="form-control" id="cfPhone" maxlength="30" required>
+          <div class="form-error" id="cfPhoneErr">Зөв утасны дугаар оруулна уу.</div>
         </div>
         <div class="form-group">
           <label data-i18n="cf_email">И-мэйл</label>
-          <input type="email" class="form-control" id="cfEmail" required>
+          <input type="email" class="form-control" id="cfEmail" maxlength="180" required>
           <div class="form-error" id="cfEmailErr">Зөв и-мэйл хаяг оруулна уу.</div>
         </div>
         <div class="form-group">
           <label data-i18n="cf_message">Мессеж</label>
-          <textarea class="form-control" id="cfMessage" required></textarea>
+          <textarea class="form-control" id="cfMessage" maxlength="4000" required></textarea>
           <div class="form-error" id="cfMessageErr">Мессежээ оруулна уу.</div>
         </div>
         <button type="submit" class="btn btn-primary btn-block" data-i18n="cf_submit">ИЛГЭЭХ</button>
@@ -988,6 +988,9 @@ table.admin-table tr:hover td{background:var(--gray-light);}
 <!-- MAIN CONTENT WILL BE INSERTED HERE -->
 </div>
 <div id="toastWrap" class="toast-wrap" aria-live="polite"></div>
+<!-- Supabase JS client: provides the real backend (Postgres database + Auth)
+     this site talks to. See supabase/schema.sql and README.md for setup. -->
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script>
 /* =====================================================================
    CONFIG
@@ -995,13 +998,31 @@ table.admin-table tr:hover td{background:var(--gray-light);}
 // REPLACE logo.png WITH THE PROVIDED PIPING ENGINEERING LOGO FILE
 const COMPANY_LOGO = "assets/logo.png";
 
-// DEMO ADMIN AUTHENTICATION.
-// THIS IS NOT PRODUCTION SECURITY.
-// REPLACE WITH SERVER-SIDE AUTHENTICATION.
-const ADMIN_CONFIG = {
-  email: "admin@pipingengineering.mn",
-  password: "CHANGE_THIS_PASSWORD"
-};
+// SUPABASE BACKEND CONFIGURATION.
+// Fill these in after creating your Supabase project (see README.md).
+// The "anon" key below is a PUBLIC key by design -- it is meant to be
+// visible in client-side code. It grants only what the Row Level Security
+// policies in supabase/schema.sql allow (e.g. visitors can submit a project
+// request but cannot read anyone else's). Real access control lives in the
+// database policies, not in keeping this key secret. Never put your Supabase
+// service_role key or database password here or anywhere in this file --
+// those are the actual secrets and must never reach the browser.
+const SUPABASE_URL = "https://YOUR-PROJECT-REF.supabase.co";
+const SUPABASE_ANON_KEY = "YOUR-PUBLIC-ANON-KEY";
+
+const sb = (typeof supabase !== 'undefined' && SUPABASE_URL.indexOf('YOUR-PROJECT-REF') === -1)
+  ? supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY)
+  : null;
+
+function requireBackend(){
+  if(!sb){
+    showToast(currentLang === 'mn'
+      ? 'Backend тохируулаагүй байна. README.md-г үзнэ үү.'
+      : 'Backend is not configured yet. See README.md for setup.', 'error');
+    return false;
+  }
+  return true;
+}
 
 const IMG_FALLBACK_ICON = "⛭";
 
@@ -1019,16 +1040,6 @@ function getData(key, fallback){
 }
 function saveData(key, data){
   localStorage.setItem(key, JSON.stringify(data));
-}
-function generateId(){
-  return 'id_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2,9);
-}
-function generateRequestId(){
-  const year = new Date().getFullYear();
-  const requests = getData('piping_project_requests', []);
-  const countThisYear = requests.filter(r => r.requestId && r.requestId.startsWith('PE-' + year)).length;
-  const next = String(countThisYear + 1).padStart(4,'0');
-  return `PE-${year}-${next}`;
 }
 
 const companyStatistics = [
@@ -1281,16 +1292,98 @@ const defaultCompanySettings = {
 const defaultTeam = [];
 
 function initializeData(){
-  if(getData('piping_company_settings', null) === null) saveData('piping_company_settings', defaultCompanySettings);
+  // The statistics counter animation still reads/writes this locally --
+  // it's per-visitor UI state, not shared application data, so it stays here
+  // regardless of whether a Supabase backend is configured.
   if(getData('piping_statistics', null) === null) saveData('piping_statistics', companyStatistics);
-  if(getData('piping_services', null) === null) saveData('piping_services', services);
-  if(getData('piping_projects', null) === null) saveData('piping_projects', projects);
-  if(getData('piping_equipment', null) === null) saveData('piping_equipment', equipment);
-  if(getData('piping_certificates', null) === null) saveData('piping_certificates', defaultCertificates);
-  if(getData('piping_team', null) === null) saveData('piping_team', defaultTeam);
-  if(getData('piping_project_requests', null) === null) saveData('piping_project_requests', []);
-  if(getData('piping_contact_messages', null) === null) saveData('piping_contact_messages', []);
 }
+
+/* =====================================================================
+   SUPABASE ROW <-> APP OBJECT MAPPERS
+   The database uses snake_case columns; the rest of this app was written
+   against camelCase objects, so these mappers translate at the boundary
+   instead of rewriting every render function's field names.
+===================================================================== */
+function mapServiceRow(r){
+  return { id:r.id, number:r.number, titleMn:r.title_mn, titleEn:r.title_en, descMn:r.desc_mn, descEn:r.desc_en,
+    image:r.image, scopeMn:r.scope_mn, scopeEn:r.scope_en, processMn:r.process_mn, processEn:r.process_en,
+    capabilityMn:r.capability_mn, capabilityEn:r.capability_en, qcMn:r.qc_mn, qcEn:r.qc_en,
+    published:r.published, sortOrder:r.sort_order };
+}
+function serviceToRow(s){
+  return { number:s.number, title_mn:s.titleMn, title_en:s.titleEn, desc_mn:s.descMn, desc_en:s.descEn,
+    image:s.image, scope_mn:s.scopeMn, scope_en:s.scopeEn, process_mn:s.processMn, process_en:s.processEn,
+    capability_mn:s.capabilityMn, capability_en:s.capabilityEn, qc_mn:s.qcMn, qc_en:s.qcEn,
+    published:s.published, sort_order:s.sortOrder };
+}
+function mapProjectRow(r){
+  return { id:r.id, titleMn:r.title_mn, titleEn:r.title_en, category:r.category, location:r.location, year:r.year,
+    workType:r.work_type, pipelineType:r.pipeline_type, diameter:r.diameter, length:r.length, heroImage:r.hero_image,
+    gallery:r.gallery || [], beforeImage:r.before_image, afterImage:r.after_image,
+    challengeMn:r.challenge_mn, challengeEn:r.challenge_en, solutionMn:r.solution_mn, solutionEn:r.solution_en,
+    scopeMn:r.scope_mn, scopeEn:r.scope_en, qualityControlMn:r.quality_control_mn, qualityControlEn:r.quality_control_en,
+    resultMn:r.result_mn, resultEn:r.result_en, published:r.published, featured:r.featured };
+}
+function projectToRow(p){
+  return { title_mn:p.titleMn, title_en:p.titleEn, category:p.category, location:p.location, year:p.year,
+    work_type:p.workType, pipeline_type:p.pipelineType, diameter:p.diameter, length:p.length, hero_image:p.heroImage,
+    gallery:p.gallery || [], before_image:p.beforeImage, after_image:p.afterImage,
+    challenge_mn:p.challengeMn, challenge_en:p.challengeEn, solution_mn:p.solutionMn, solution_en:p.solutionEn,
+    scope_mn:p.scopeMn, scope_en:p.scopeEn, quality_control_mn:p.qualityControlMn, quality_control_en:p.qualityControlEn,
+    result_mn:p.resultMn, result_en:p.resultEn, published:p.published, featured:p.featured };
+}
+function mapEquipmentRow(r){
+  return { id:r.id, category:r.category, nameMn:r.name_mn, nameEn:r.name_en, descMn:r.desc_mn, descEn:r.desc_en,
+    specMn:r.spec_mn, specEn:r.spec_en, image:r.image, published:r.published };
+}
+function equipmentToRow(e){
+  return { category:e.category, name_mn:e.nameMn, name_en:e.nameEn, desc_mn:e.descMn, desc_en:e.descEn,
+    spec_mn:e.specMn, spec_en:e.specEn, image:e.image, published:e.published };
+}
+function mapCertificateRow(r){
+  return { id:r.id, titleMn:r.title_mn, titleEn:r.title_en, issuer:r.issuer, image:r.image, published:r.published };
+}
+function certificateToRow(c){
+  return { title_mn:c.titleMn, title_en:c.titleEn, issuer:c.issuer, image:c.image, published:c.published };
+}
+function mapTeamRow(r){
+  return { id:r.id, nameMn:r.name_mn, nameEn:r.name_en, roleMn:r.role_mn, roleEn:r.role_en, photo:r.photo, published:r.published };
+}
+function teamToRow(t){
+  return { name_mn:t.nameMn, name_en:t.nameEn, role_mn:t.roleMn, role_en:t.roleEn, photo:t.photo, published:t.published };
+}
+function mapSettingsRow(r){
+  return { heroTitleMn:r.hero_title_mn, heroDescMn:r.hero_desc_mn, aboutP1Mn:r.about_p1_mn, aboutP2Mn:r.about_p2_mn,
+    companyPhone:r.company_phone, companyEmail:r.company_email, companyAddress:r.company_address, workingHours:r.working_hours,
+    projectPhone:r.project_phone, facebookUrl:r.facebook_url, instagramUrl:r.instagram_url, linkedinUrl:r.linkedin_url,
+    footerDesc:r.footer_desc, seoTitle:r.seo_title, seoDescription:r.seo_description, googleMapsUrl:r.google_maps_url };
+}
+function settingsToRow(s){
+  return { hero_title_mn:s.heroTitleMn, hero_desc_mn:s.heroDescMn, about_p1_mn:s.aboutP1Mn, about_p2_mn:s.aboutP2Mn,
+    company_phone:s.companyPhone, company_email:s.companyEmail, company_address:s.companyAddress, working_hours:s.workingHours,
+    project_phone:s.projectPhone, facebook_url:s.facebookUrl, instagram_url:s.instagramUrl, linkedin_url:s.linkedinUrl,
+    footer_desc:s.footerDesc, seo_title:s.seoTitle, seo_description:s.seoDescription, google_maps_url:s.googleMapsUrl };
+}
+function mapRequestRow(r){
+  return { _dbId:r.id, requestId:r.request_id, companyName:r.company_name, contactPerson:r.contact_person, phone:r.phone,
+    email:r.email, location:r.location, workType:r.work_type, pipeType:r.pipe_type, diameter:r.diameter,
+    pipelineLength:r.pipeline_length, startDate:r.start_date, description:r.description, files:r.files || [],
+    status:r.status, internalNotes:r.internal_notes || [], activity:r.activity || [], createdAt:r.created_at };
+}
+function mapMessageRow(r){
+  return { id:r.id, name:r.name, company:r.company, phone:r.phone, email:r.email, message:r.message,
+    createdAt:r.created_at, read:r.read };
+}
+
+// In-memory caches populated by each render*() fetch so detail-modal openers
+// (which only receive an id from a click handler) don't need a second
+// network round trip.
+let servicesCache = [];
+let projectsCache = [];
+let equipmentCache = [];
+let certificatesCache = [];
+let teamCache = [];
+let companySettingsCache = defaultCompanySettings;
 
 /* =====================================================================
    SECURITY HELPERS
@@ -1504,8 +1597,7 @@ function applyLanguage(lang){
   document.querySelectorAll('[data-i18n-html]').forEach(el => {
     const key = el.getAttribute('data-i18n-html');
     if(key === 'hero_title'){
-      const settings = getData('piping_company_settings', defaultCompanySettings);
-      el.innerHTML = lang === 'mn' ? settings.heroTitleMn : 'PIPELINE <span class="hl">ENGINEERING SOLUTIONS</span>';
+      el.innerHTML = lang === 'mn' ? companySettingsCache.heroTitleMn : 'PIPELINE <span class="hl">ENGINEERING SOLUTIONS</span>';
     } else if(key === 'about_title'){
       el.innerHTML = lang === 'mn' ? 'ИНЖЕНЕРИЙН ТУРШЛАГА.<br>МЭРГЭЖЛИЙН ГҮЙЦЭТГЭЛ.' : 'ENGINEERING EXPERIENCE.<br>PROFESSIONAL EXECUTION.';
     } else if(key === 'safety_title'){
@@ -1515,7 +1607,6 @@ function applyLanguage(lang){
   document.querySelectorAll('.lang-switch button, .langBtnMobile').forEach(btn => {
     btn.classList.toggle('active', btn.getAttribute('data-lang') === lang);
   });
-  const settings = getData('piping_company_settings', defaultCompanySettings);
   document.getElementById('cfMessage') && (document.getElementById('cfMessage').placeholder = '');
   document.getElementById('rfLocation') && (document.getElementById('rfLocation').placeholder = lang === 'mn' ? 'Жишээ: Улаанбаатар, Баянзүрх дүүрэг' : 'e.g. Ulaanbaatar, Bayanzurkh District');
   renderServices();
@@ -1525,7 +1616,6 @@ function applyLanguage(lang){
   renderCertificates();
   renderStatsLabelsOnly();
   populateWorkTypeSelect();
-  renderFooterServices();
   if(window.adminAuthed){ renderAdminCurrentView(); }
 }
 
@@ -1735,7 +1825,7 @@ function animateCount(el){
 ===================================================================== */
 function initAboutModal(){
   document.getElementById('aboutMoreBtn').addEventListener('click', () => {
-    const settings = getData('piping_company_settings', defaultCompanySettings);
+    const settings = companySettingsCache;
     const isMn = currentLang === 'mn';
     document.getElementById('aboutModalBody').innerHTML = `
       <div class="about-media" style="margin-bottom:24px;">
@@ -1772,8 +1862,16 @@ function initAboutModal(){
 /* =====================================================================
    SERVICES
 ===================================================================== */
-function renderServices(){
-  const list = getData('piping_services', services).filter(s => s.published !== false);
+async function renderServices(){
+  let list;
+  if(sb){
+    const { data, error } = await sb.from('services').select('*').eq('published', true).order('sort_order');
+    if(error){ console.error(error); list = []; }
+    else list = data.map(mapServiceRow);
+  } else {
+    list = services.filter(s => s.published !== false);
+  }
+  servicesCache = list;
   const grid = document.getElementById('servicesGrid');
   const isMn = currentLang === 'mn';
   grid.innerHTML = list.map(s => `
@@ -1793,11 +1891,11 @@ function renderServices(){
     card.addEventListener('click', () => openServiceModal(card.getAttribute('data-service-id')));
   });
   initScrollReveal();
+  renderFooterServices();
 }
 
 function openServiceModal(serviceId){
-  const list = getData('piping_services', services);
-  const s = list.find(x => x.id === serviceId);
+  const s = servicesCache.find(x => String(x.id) === String(serviceId));
   if(!s) return;
   const isMn = currentLang === 'mn';
   document.getElementById('serviceModalContent').innerHTML = `
@@ -1837,14 +1935,24 @@ function renderProjectFilters(){
     btn.addEventListener('click', () => {
       currentProjectFilter = btn.getAttribute('data-filter');
       renderProjectFilters();
-      renderProjectsList();
+      renderProjectsListFromCache();
     });
   });
 }
 
-function renderProjectsList(){
-  const all = getData('piping_projects', projects).filter(p => p.published !== false);
-  const list = currentProjectFilter === 'all' ? all : all.filter(p => p.category === currentProjectFilter);
+async function loadProjects(){
+  if(sb){
+    const { data, error } = await sb.from('projects').select('*').eq('published', true);
+    projectsCache = error ? [] : data.map(mapProjectRow);
+    if(error) console.error(error);
+  } else {
+    projectsCache = projects.filter(p => p.published !== false);
+  }
+  renderProjectsListFromCache();
+}
+
+function renderProjectsListFromCache(){
+  const list = currentProjectFilter === 'all' ? projectsCache : projectsCache.filter(p => p.category === currentProjectFilter);
   const wrap = document.getElementById('projectsList');
   const isMn = currentLang === 'mn';
   if(list.length === 0){
@@ -1878,12 +1986,11 @@ function renderProjectsList(){
 
 function renderProjects(){
   renderProjectFilters();
-  renderProjectsList();
+  loadProjects();
 }
 
 function openProjectModal(projectId){
-  const list = getData('piping_projects', projects);
-  const p = list.find(x => x.id === projectId);
+  const p = projectsCache.find(x => String(x.id) === String(projectId));
   if(!p) return;
   const isMn = currentLang === 'mn';
   document.getElementById('projectModalContent').innerHTML = `
@@ -2025,14 +2132,24 @@ function renderEquipmentFilters(){
     btn.addEventListener('click', () => {
       currentEquipmentFilter = btn.getAttribute('data-eqfilter');
       renderEquipmentFilters();
-      renderEquipmentGrid();
+      renderEquipmentGridFromCache();
     });
   });
 }
 
-function renderEquipmentGrid(){
-  const all = getData('piping_equipment', equipment).filter(e => e.published !== false);
-  const list = currentEquipmentFilter === 'all' ? all : all.filter(e => e.category === currentEquipmentFilter);
+async function loadEquipment(){
+  if(sb){
+    const { data, error } = await sb.from('equipment').select('*').eq('published', true);
+    equipmentCache = error ? [] : data.map(mapEquipmentRow);
+    if(error) console.error(error);
+  } else {
+    equipmentCache = equipment.filter(e => e.published !== false);
+  }
+  renderEquipmentGridFromCache();
+}
+
+function renderEquipmentGridFromCache(){
+  const list = currentEquipmentFilter === 'all' ? equipmentCache : equipmentCache.filter(e => e.category === currentEquipmentFilter);
   const grid = document.getElementById('equipmentGrid');
   const isMn = currentLang === 'mn';
   const dict = translations[currentLang];
@@ -2057,7 +2174,7 @@ function renderEquipmentGrid(){
 
 function renderEquipment(){
   renderEquipmentFilters();
-  renderEquipmentGrid();
+  loadEquipment();
 }
 
 /* =====================================================================
@@ -2086,8 +2203,16 @@ function renderSafety(){
 /* =====================================================================
    CERTIFICATES
 ===================================================================== */
-function renderCertificates(){
-  const certs = getData('piping_certificates', defaultCertificates).filter(c => c.published !== false);
+async function renderCertificates(){
+  let certs;
+  if(sb){
+    const { data, error } = await sb.from('certificates').select('*').eq('published', true);
+    certs = error ? [] : data.map(mapCertificateRow);
+    if(error) console.error(error);
+  } else {
+    certs = defaultCertificates.filter(c => c.published !== false);
+  }
+  certificatesCache = certs;
   const wrap = document.getElementById('certWrap');
   const isMn = currentLang === 'mn';
   if(certs.length === 0){
@@ -2131,6 +2256,7 @@ function populateWorkTypeSelect(){
 const ALLOWED_FILE_TYPES = ['image/jpeg','image/jpg','image/png','image/webp','application/pdf'];
 const ALLOWED_FILE_EXT = ['.jpg','.jpeg','.png','.webp','.pdf'];
 const MAX_FILE_SIZE = 10 * 1024 * 1024;
+const MAX_FILE_COUNT = 10;
 
 let wizardState = { step:1, files:[] };
 
@@ -2176,11 +2302,12 @@ function showFieldError(inputId, show){
 }
 
 function isValidEmail(v){ return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v); }
+function isValidPhone(v){ return /^[+()\d][\d\s()-]{5,19}$/.test((v || '').trim()); }
 
 function validateWizardStep(step){
   let valid = true;
   if(step === 1){
-    const fields = [['rfCompanyName',v=>v.trim().length>0],['rfContactPerson',v=>v.trim().length>0],['rfPhone',v=>v.trim().length>=6],['rfEmail',isValidEmail]];
+    const fields = [['rfCompanyName',v=>v.trim().length>0],['rfContactPerson',v=>v.trim().length>0],['rfPhone',isValidPhone],['rfEmail',isValidEmail]];
     fields.forEach(([id,test]) => {
       const val = document.getElementById(id).value;
       const ok = test(val);
@@ -2249,35 +2376,50 @@ function initWizardNav(){
   document.getElementById('successCloseBtn').addEventListener('click', () => closeModal('modal-request'));
 }
 
-function submitProjectRequest(){
-  const requestId = generateRequestId();
-  const request = {
-    requestId,
-    companyName: document.getElementById('rfCompanyName').value.trim(),
-    contactPerson: document.getElementById('rfContactPerson').value.trim(),
-    phone: document.getElementById('rfPhone').value.trim(),
-    email: document.getElementById('rfEmail').value.trim(),
-    location: document.getElementById('rfLocation').value.trim(),
-    workType: document.getElementById('rfWorkType').value,
-    pipeType: document.getElementById('rfPipeType').value.trim(),
-    diameter: document.getElementById('rfDiameter').value.trim(),
-    pipelineLength: document.getElementById('rfLength').value.trim(),
-    startDate: document.getElementById('rfStartDate').value,
-    description: document.getElementById('rfDescription').value.trim(),
-    files: wizardState.files.map(f => ({ name:f.name, size:f.size, type:f.type })),
-    createdAt: new Date().toISOString(),
-    status: 'NEW',
-    internalNotes: [],
-    activity: [{ text:'Request created', date:new Date().toISOString() }]
-  };
-  const requests = getData('piping_project_requests', []);
-  requests.push(request);
-  saveData('piping_project_requests', requests);
-  document.getElementById('successRequestId').textContent = requestId;
-  document.getElementById('wizardContent').classList.add('hidden');
-  document.getElementById('successView').classList.remove('hidden');
-  applyLanguage(currentLang);
-  if(window.adminAuthed) renderAdminCurrentView();
+async function submitProjectRequest(){
+  if(!requireBackend()) return;
+  const nextBtn = document.getElementById('wizardNextBtn');
+  const originalLabel = nextBtn.textContent;
+  nextBtn.disabled = true;
+  nextBtn.textContent = currentLang === 'mn' ? 'ИЛГЭЭЖ БАЙНА...' : 'SUBMITTING...';
+  try{
+    const { data: requestId, error: idError } = await sb.rpc('next_request_id');
+    if(idError){
+      console.error(idError);
+      showToast(currentLang === 'mn' ? 'Хүсэлт илгээхэд алдаа гарлаа.' : 'Failed to submit the request.', 'error');
+      return;
+    }
+    const payload = {
+      request_id: requestId,
+      company_name: document.getElementById('rfCompanyName').value.trim(),
+      contact_person: document.getElementById('rfContactPerson').value.trim(),
+      phone: document.getElementById('rfPhone').value.trim(),
+      email: document.getElementById('rfEmail').value.trim(),
+      location: document.getElementById('rfLocation').value.trim(),
+      work_type: document.getElementById('rfWorkType').value,
+      pipe_type: document.getElementById('rfPipeType').value.trim(),
+      diameter: document.getElementById('rfDiameter').value.trim(),
+      pipeline_length: document.getElementById('rfLength').value.trim(),
+      start_date: document.getElementById('rfStartDate').value || null,
+      description: document.getElementById('rfDescription').value.trim(),
+      files: wizardState.files.map(f => ({ name:f.name, size:f.size, type:f.type })),
+      status: 'NEW',
+      internal_notes: [],
+      activity: [{ text:'Request created', date:new Date().toISOString() }]
+    };
+    const { error: insertError } = await sb.from('project_requests').insert(payload);
+    if(insertError){
+      console.error(insertError);
+      showToast(currentLang === 'mn' ? 'Хүсэлт илгээхэд алдаа гарлаа.' : 'Failed to submit the request.', 'error');
+      return;
+    }
+    document.getElementById('successRequestId').textContent = requestId;
+    document.getElementById('wizardContent').classList.add('hidden');
+    document.getElementById('successView').classList.remove('hidden');
+  } finally {
+    nextBtn.disabled = false;
+    nextBtn.textContent = originalLabel;
+  }
 }
 
 /* ---- File upload (drag/drop) ---- */
@@ -2302,6 +2444,10 @@ function initFileUpload(){
 function handleFiles(fileListRaw){
   const isMn = currentLang === 'mn';
   Array.from(fileListRaw).forEach(file => {
+    if(wizardState.files.length >= MAX_FILE_COUNT){
+      showToast(isMn ? `Ихдээ ${MAX_FILE_COUNT} файл хавсаргах боломжтой.` : `You can attach up to ${MAX_FILE_COUNT} files.`, 'error');
+      return;
+    }
     const ext = '.' + file.name.split('.').pop().toLowerCase();
     const typeOk = ALLOWED_FILE_TYPES.includes(file.type) || ALLOWED_FILE_EXT.includes(ext);
     if(!typeOk){
@@ -2336,8 +2482,22 @@ function renderFileList(){
 /* =====================================================================
    CONTACT SECTION
 ===================================================================== */
+async function loadCompanySettings(){
+  if(sb){
+    const { data, error } = await sb.from('company_settings').select('*').eq('id', 1).maybeSingle();
+    companySettingsCache = (error || !data) ? defaultCompanySettings : mapSettingsRow(data);
+    if(error) console.error(error);
+  } else {
+    companySettingsCache = defaultCompanySettings;
+  }
+  document.title = companySettingsCache.seoTitle;
+  document.getElementById('metaDescription').setAttribute('content', companySettingsCache.seoDescription);
+  renderContactInfo();
+  applyLanguage(currentLang);
+}
+
 function renderContactInfo(){
-  const s = getData('piping_company_settings', defaultCompanySettings);
+  const s = companySettingsCache;
   document.getElementById('contactPhoneVal').textContent = s.companyPhone;
   document.getElementById('contactEmailVal').textContent = s.companyEmail;
   document.getElementById('contactAddressVal').textContent = s.companyAddress;
@@ -2359,16 +2519,17 @@ function renderContactInfo(){
 }
 
 function renderFooterServices(){
-  const list = getData('piping_services', services).filter(s => s.published !== false).slice(0,5);
+  const list = servicesCache.slice(0,5);
   const isMn = currentLang === 'mn';
-  document.getElementById('footerServicesList').innerHTML = list.map(s => `<li>${isMn ? s.titleMn : s.titleEn}</li>`).join('');
+  document.getElementById('footerServicesList').innerHTML = list.map(s => `<li>${escapeHtml(isMn ? s.titleMn : s.titleEn)}</li>`).join('');
 }
 
 function initContactForm(){
   document.getElementById('footerYear').textContent = new Date().getFullYear();
   const form = document.getElementById('contactForm');
-  form.addEventListener('submit', e => {
+  form.addEventListener('submit', async e => {
     e.preventDefault();
+    if(!requireBackend()) return;
     const isMn = currentLang === 'mn';
     const name = document.getElementById('cfName').value.trim();
     const phone = document.getElementById('cfPhone').value.trim();
@@ -2376,19 +2537,29 @@ function initContactForm(){
     const message = document.getElementById('cfMessage').value.trim();
     let valid = true;
     showFieldError('cfName', name.length === 0); if(name.length === 0) valid = false;
-    showFieldError('cfPhone', phone.length === 0); if(phone.length === 0) valid = false;
+    showFieldError('cfPhone', !isValidPhone(phone)); if(!isValidPhone(phone)) valid = false;
     showFieldError('cfEmail', !isValidEmail(email)); if(!isValidEmail(email)) valid = false;
     showFieldError('cfMessage', message.length === 0); if(message.length === 0) valid = false;
     if(!valid) return;
-    const messages = getData('piping_contact_messages', []);
-    messages.push({
-      id:generateId(), name, company:document.getElementById('cfCompany').value.trim(), phone, email, message,
-      createdAt:new Date().toISOString(), read:false
-    });
-    saveData('piping_contact_messages', messages);
-    form.reset();
-    showToast(isMn ? 'Мессеж амжилттай илгээгдлээ.' : 'Message sent successfully.', 'success');
-    if(window.adminAuthed) renderAdminCurrentView();
+    const submitBtn = form.querySelector('button[type="submit"]');
+    const originalLabel = submitBtn.textContent;
+    submitBtn.disabled = true;
+    submitBtn.textContent = isMn ? 'ИЛГЭЭЖ БАЙНА...' : 'SENDING...';
+    try{
+      const { error } = await sb.from('contact_messages').insert({
+        name, company: document.getElementById('cfCompany').value.trim(), phone, email, message
+      });
+      if(error){
+        console.error(error);
+        showToast(isMn ? 'Мессеж илгээхэд алдаа гарлаа.' : 'Failed to send message.', 'error');
+        return;
+      }
+      form.reset();
+      showToast(isMn ? 'Мессеж амжилттай илгээгдлээ.' : 'Message sent successfully.', 'success');
+    } finally {
+      submitBtn.disabled = false;
+      submitBtn.textContent = originalLabel;
+    }
   });
 }
 
@@ -2399,27 +2570,45 @@ window.adminAuthed = false;
 
 function initAdminAuth(){
   document.getElementById('adminOpenBtn').addEventListener('click', () => {
+    if(!requireBackend()) return;
     document.getElementById('adminLoginErr').classList.remove('show');
     document.getElementById('adminLoginForm').reset();
     openModal('modal-admin-login');
   });
 
-  document.getElementById('adminLoginForm').addEventListener('submit', e => {
+  document.getElementById('adminLoginForm').addEventListener('submit', async e => {
     e.preventDefault();
+    if(!requireBackend()) return;
     const email = document.getElementById('adminEmail').value.trim();
     const password = document.getElementById('adminPassword').value;
-    if(email === ADMIN_CONFIG.email && password === ADMIN_CONFIG.password){
-      sessionStorage.setItem('piping_admin_session', JSON.stringify({ email, loggedInAt:new Date().toISOString() }));
-      document.getElementById('adminLoginErr').classList.remove('show');
+    const submitBtn = e.target.querySelector('button[type="submit"]');
+    const errEl = document.getElementById('adminLoginErr');
+    errEl.classList.remove('show');
+    submitBtn.disabled = true;
+    const originalLabel = submitBtn.textContent;
+    submitBtn.textContent = currentLang === 'mn' ? 'НЭВТРЭХ...' : 'SIGNING IN...';
+    try{
+      // Real server-side auth: Supabase validates the password against a
+      // securely hashed credential and rate-limits repeated failed
+      // attempts on its own -- nothing password-related happens in this file.
+      const { error } = await sb.auth.signInWithPassword({ email, password });
+      if(error){
+        errEl.textContent = currentLang === 'mn'
+          ? 'И-мэйл эсвэл нууц үг буруу, эсвэл дахин оролдоход хэт олон удаа буруу оролдлого хийсэн байна.'
+          : 'Incorrect email/password, or too many failed attempts -- please wait and try again.';
+        errEl.classList.add('show');
+        return;
+      }
       closeModal('modal-admin-login');
       enterAdminDashboard();
-    } else {
-      document.getElementById('adminLoginErr').classList.add('show');
+    } finally {
+      submitBtn.disabled = false;
+      submitBtn.textContent = originalLabel;
     }
   });
 
-  document.getElementById('adminLogoutBtn').addEventListener('click', () => {
-    sessionStorage.removeItem('piping_admin_session');
+  document.getElementById('adminLogoutBtn').addEventListener('click', async () => {
+    if(sb) await sb.auth.signOut();
     window.adminAuthed = false;
     document.getElementById('adminDashboard').classList.add('hidden');
     document.getElementById('publicSite').classList.remove('hidden');
@@ -2427,8 +2616,18 @@ function initAdminAuth(){
     showToast(currentLang === 'mn' ? 'Гарлаа.' : 'Logged out.', 'info');
   });
 
-  if(sessionStorage.getItem('piping_admin_session')){
-    enterAdminDashboard();
+  if(sb){
+    sb.auth.getSession().then(({ data }) => {
+      if(data.session) enterAdminDashboard();
+    });
+    // Keeps the UI in sync if the session expires or is revoked elsewhere.
+    sb.auth.onAuthStateChange((event) => {
+      if(event === 'SIGNED_OUT' && window.adminAuthed){
+        window.adminAuthed = false;
+        document.getElementById('adminDashboard').classList.add('hidden');
+        document.getElementById('publicSite').classList.remove('hidden');
+      }
+    });
   }
 }
 
@@ -2484,11 +2683,14 @@ function renderAdminCurrentView(){
   }
 }
 
-function updateAdminBadges(){
-  const requests = getData('piping_project_requests', []);
-  const messages = getData('piping_contact_messages', []);
-  document.getElementById('badgeRequests').textContent = requests.filter(r => r.status === 'NEW').length;
-  document.getElementById('badgeMessages').textContent = messages.filter(m => !m.read).length;
+async function updateAdminBadges(){
+  if(!sb) return;
+  const [{ count: newCount }, { count: unreadCount }] = await Promise.all([
+    sb.from('project_requests').select('*', { count:'exact', head:true }).eq('status', 'NEW'),
+    sb.from('contact_messages').select('*', { count:'exact', head:true }).eq('read', false)
+  ]);
+  document.getElementById('badgeRequests').textContent = newCount || 0;
+  document.getElementById('badgeMessages').textContent = unreadCount || 0;
 }
 
 function fmtDate(iso){
@@ -2500,24 +2702,37 @@ function fmtDate(iso){
 /* =====================================================================
    ADMIN: DASHBOARD OVERVIEW
 ===================================================================== */
-function renderAdminDashboardView(){
-  const requests = getData('piping_project_requests', []);
-  const messages = getData('piping_contact_messages', []);
-  const projectsData = getData('piping_projects', projects);
-  const servicesData = getData('piping_services', services);
-  const newCount = requests.filter(r => r.status === 'NEW').length;
-  const reviewingCount = requests.filter(r => r.status === 'REVIEWING').length;
-  const recentRequests = [...requests].sort((a,b) => new Date(b.createdAt) - new Date(a.createdAt)).slice(0,5);
-  const recentMessages = [...messages].sort((a,b) => new Date(b.createdAt) - new Date(a.createdAt)).slice(0,5);
+async function renderAdminDashboardView(){
+  if(!sb){
+    document.getElementById('view-dashboard').innerHTML = `<div class="cert-empty">Backend тохируулаагүй байна. README.md-г үзнэ үү.</div>`;
+    return;
+  }
+  const [
+    { count: newCount },
+    { count: reviewingCount },
+    { count: projectsCount },
+    { count: servicesCount },
+    { data: recentRequestsRaw },
+    { data: recentMessagesRaw }
+  ] = await Promise.all([
+    sb.from('project_requests').select('*', { count:'exact', head:true }).eq('status', 'NEW'),
+    sb.from('project_requests').select('*', { count:'exact', head:true }).eq('status', 'REVIEWING'),
+    sb.from('projects').select('*', { count:'exact', head:true }),
+    sb.from('services').select('*', { count:'exact', head:true }),
+    sb.from('project_requests').select('*').order('created_at', { ascending:false }).limit(5),
+    sb.from('contact_messages').select('*').order('created_at', { ascending:false }).limit(5)
+  ]);
+  const recentRequests = (recentRequestsRaw || []).map(mapRequestRow);
+  const recentMessages = (recentMessagesRaw || []).map(mapMessageRow);
 
   document.getElementById('view-dashboard').innerHTML = `
     <h1 class="admin-h1">ХЯНАЛТЫН САМБАР</h1>
     <p class="admin-sub">Системийн ерөнхий тойм мэдээлэл.</p>
     <div class="admin-stats-grid">
-      <div class="admin-stat-card"><div class="v">${newCount}</div><div class="l">Шинэ хүсэлт</div></div>
-      <div class="admin-stat-card"><div class="v">${reviewingCount}</div><div class="l">Судалж буй хүсэлт</div></div>
-      <div class="admin-stat-card"><div class="v">${projectsData.length}</div><div class="l">Нийт төсөл</div></div>
-      <div class="admin-stat-card"><div class="v">${servicesData.length}</div><div class="l">Нийт үйлчилгээ</div></div>
+      <div class="admin-stat-card"><div class="v">${newCount || 0}</div><div class="l">Шинэ хүсэлт</div></div>
+      <div class="admin-stat-card"><div class="v">${reviewingCount || 0}</div><div class="l">Судалж буй хүсэлт</div></div>
+      <div class="admin-stat-card"><div class="v">${projectsCount || 0}</div><div class="l">Нийт төсөл</div></div>
+      <div class="admin-stat-card"><div class="v">${servicesCount || 0}</div><div class="l">Нийт үйлчилгээ</div></div>
     </div>
     <div class="admin-panel">
       <div class="admin-panel-head"><h3>Сүүлийн хүсэлтүүд</h3></div>
@@ -2554,8 +2769,17 @@ function renderAdminDashboardView(){
 ===================================================================== */
 const REQUEST_STATUSES = ['NEW','REVIEWING','CONTACTED','QUOTED','APPROVED','IN_PROGRESS','COMPLETED','REJECTED'];
 
-function renderAdminRequestsView(){
-  const requests = [...getData('piping_project_requests', [])].sort((a,b) => new Date(b.createdAt) - new Date(a.createdAt));
+let requestsCache = [];
+
+async function renderAdminRequestsView(){
+  if(!sb){
+    document.getElementById('view-requests').innerHTML = `<div class="cert-empty">Backend тохируулаагүй байна. README.md-г үзнэ үү.</div>`;
+    return;
+  }
+  const { data, error } = await sb.from('project_requests').select('*').order('created_at', { ascending:false });
+  if(error) console.error(error);
+  const requests = (data || []).map(mapRequestRow);
+  requestsCache = requests;
   document.getElementById('view-requests').innerHTML = `
     <h1 class="admin-h1">ХҮСЭЛТҮҮД</h1>
     <p class="admin-sub">Нийт ${requests.length} хүсэлт.</p>
@@ -2584,10 +2808,12 @@ function renderAdminRequestsView(){
   });
   document.querySelectorAll('[data-delete-request]').forEach(btn => {
     btn.addEventListener('click', () => {
-      confirmAction('Энэ хүсэлтийг устгахдаа итгэлтэй байна уу?', () => {
+      confirmAction('Энэ хүсэлтийг устгахдаа итгэлтэй байна уу?', async () => {
         const reqId = btn.getAttribute('data-delete-request');
-        const all = getData('piping_project_requests', []).filter(r => r.requestId !== reqId);
-        saveData('piping_project_requests', all);
+        const target = requestsCache.find(r => r.requestId === reqId);
+        if(!target) return;
+        const { error } = await sb.from('project_requests').delete().eq('id', target._dbId);
+        if(error){ console.error(error); showToast('Устгахад алдаа гарлаа.', 'error'); return; }
         renderAdminRequestsView();
         updateAdminBadges();
         showToast('Хүсэлт устгагдлаа.', 'success');
@@ -2597,8 +2823,7 @@ function renderAdminRequestsView(){
 }
 
 function openRequestDetail(requestId){
-  const all = getData('piping_project_requests', []);
-  const r = all.find(x => x.requestId === requestId);
+  const r = requestsCache.find(x => x.requestId === requestId);
   if(!r) return;
   document.getElementById('reqDetailTitle').textContent = r.requestId;
   document.getElementById('reqDetailBody').innerHTML = `
@@ -2645,36 +2870,28 @@ function openRequestDetail(requestId){
       </div>
     </div>
   `;
-  document.getElementById('reqStatusSaveBtn').addEventListener('click', () => {
+  document.getElementById('reqStatusSaveBtn').addEventListener('click', async () => {
     const newStatus = document.getElementById('reqStatusSelect').value;
-    const list = getData('piping_project_requests', []);
-    const idx = list.findIndex(x => x.requestId === requestId);
-    if(idx > -1 && list[idx].status !== newStatus){
-      list[idx].status = newStatus;
-      list[idx].activity = list[idx].activity || [];
-      list[idx].activity.push({ text:`Status changed to ${newStatus}`, date:new Date().toISOString() });
-      saveData('piping_project_requests', list);
-      showToast('Төлөв шинэчлэгдлээ.', 'success');
-      renderAdminRequestsView();
-      updateAdminBadges();
-      openRequestDetail(requestId);
-    }
+    if(newStatus === r.status) return;
+    const activity = [...(r.activity || []), { text:`Status changed to ${newStatus}`, date:new Date().toISOString() }];
+    const { error } = await sb.from('project_requests').update({ status:newStatus, activity }).eq('id', r._dbId);
+    if(error){ console.error(error); showToast('Шинэчлэхэд алдаа гарлаа.', 'error'); return; }
+    showToast('Төлөв шинэчлэгдлээ.', 'success');
+    await renderAdminRequestsView();
+    updateAdminBadges();
+    openRequestDetail(requestId);
   });
-  document.getElementById('reqNoteAddBtn').addEventListener('click', () => {
+  document.getElementById('reqNoteAddBtn').addEventListener('click', async () => {
     const input = document.getElementById('reqNoteInput');
     const text = input.value.trim();
     if(!text) return;
-    const list = getData('piping_project_requests', []);
-    const idx = list.findIndex(x => x.requestId === requestId);
-    if(idx > -1){
-      list[idx].internalNotes = list[idx].internalNotes || [];
-      list[idx].internalNotes.push({ text, date:new Date().toISOString() });
-      list[idx].activity = list[idx].activity || [];
-      list[idx].activity.push({ text:'Admin note added', date:new Date().toISOString() });
-      saveData('piping_project_requests', list);
-      showToast('Тэмдэглэл нэмэгдлээ.', 'success');
-      openRequestDetail(requestId);
-    }
+    const internalNotes = [...(r.internalNotes || []), { text, date:new Date().toISOString() }];
+    const activity = [...(r.activity || []), { text:'Admin note added', date:new Date().toISOString() }];
+    const { error } = await sb.from('project_requests').update({ internal_notes:internalNotes, activity }).eq('id', r._dbId);
+    if(error){ console.error(error); showToast('Тэмдэглэл нэмэхэд алдаа гарлаа.', 'error'); return; }
+    showToast('Тэмдэглэл нэмэгдлээ.', 'success');
+    await renderAdminRequestsView();
+    openRequestDetail(requestId);
   });
   openModal('modal-request-detail');
 }
@@ -2682,8 +2899,19 @@ function openRequestDetail(requestId){
 /* =====================================================================
    ADMIN: CONTACT MESSAGES
 ===================================================================== */
-function renderAdminMessagesView(){
-  const messages = [...getData('piping_contact_messages', [])].sort((a,b) => new Date(b.createdAt) - new Date(a.createdAt));
+async function renderAdminMessagesView(){
+  if(!sb){
+    document.getElementById('view-messages').innerHTML = `<div class="cert-empty">Backend тохируулаагүй байна. README.md-г үзнэ үү.</div>`;
+    return;
+  }
+  const { data, error } = await sb.from('contact_messages').select('*').order('created_at', { ascending:false });
+  if(error) console.error(error);
+  const messages = (data || []).map(mapMessageRow);
+  const unreadIds = messages.filter(m => !m.read).map(m => m.id);
+  if(unreadIds.length){
+    await sb.from('contact_messages').update({ read:true }).in('id', unreadIds);
+    updateAdminBadges();
+  }
   document.getElementById('view-messages').innerHTML = `
     <h1 class="admin-h1">ХОЛБОО БАРИХ ХҮСЭЛТ</h1>
     <p class="admin-sub">Нийт ${messages.length} мессеж.</p>
@@ -2705,10 +2933,10 @@ function renderAdminMessagesView(){
   `;
   document.querySelectorAll('[data-delete-message]').forEach(btn => {
     btn.addEventListener('click', () => {
-      confirmAction('Энэ мессежийг устгахдаа итгэлтэй байна уу?', () => {
+      confirmAction('Энэ мессежийг устгахдаа итгэлтэй байна уу?', async () => {
         const id = btn.getAttribute('data-delete-message');
-        const all = getData('piping_contact_messages', []).filter(m => m.id !== id);
-        saveData('piping_contact_messages', all);
+        const { error } = await sb.from('contact_messages').delete().eq('id', id);
+        if(error){ console.error(error); showToast('Устгахад алдаа гарлаа.', 'error'); return; }
         renderAdminMessagesView();
         updateAdminBadges();
         showToast('Мессеж устгагдлаа.', 'success');
@@ -2739,7 +2967,8 @@ function initConfirmDialog(){
 ===================================================================== */
 const ENTITY_SCHEMAS = {
   projects: {
-    storageKey:'piping_projects', title:'Төсөл', publicRender:() => renderProjects(),
+    table:'projects', toRow:projectToRow, fromRow:mapProjectRow, defaults:projects,
+    title:'Төсөл', publicRender:() => renderProjects(),
     fields:[
       {key:'titleMn', label:'Гарчиг (MN)', type:'text', required:true},
       {key:'titleEn', label:'Гарчиг (EN)', type:'text', required:true},
@@ -2767,7 +2996,8 @@ const ENTITY_SCHEMAS = {
     ]
   },
   services: {
-    storageKey:'piping_services', title:'Үйлчилгээ', publicRender:() => renderServices(),
+    table:'services', toRow:serviceToRow, fromRow:mapServiceRow, defaults:services,
+    title:'Үйлчилгээ', publicRender:() => renderServices(),
     fields:[
       {key:'number', label:'Дугаар', type:'text', required:true},
       {key:'titleMn', label:'Гарчиг (MN)', type:'text', required:true},
@@ -2786,7 +3016,8 @@ const ENTITY_SCHEMAS = {
     ]
   },
   equipment: {
-    storageKey:'piping_equipment', title:'Тоног төхөөрөмж', publicRender:() => renderEquipment(),
+    table:'equipment', toRow:equipmentToRow, fromRow:mapEquipmentRow, defaults:equipment,
+    title:'Тоног төхөөрөмж', publicRender:() => renderEquipment(),
     fields:[
       {key:'category', label:'Ангилал', type:'select', options:[['welding','Гагнуурын тоног төхөөрөмж'],['cutting','Хоолой зүсэх төхөөрөмж'],['testing','Даралтын туршилтын төхөөрөмж'],['excavator','Экскаватор'],['lifting','Өргөх механизм'],['generator','Цахилгаан үүсгүүр'],['service','Үйлчилгээний автомашин']], required:true},
       {key:'nameMn', label:'Нэр (MN)', type:'text', required:true},
@@ -2799,7 +3030,8 @@ const ENTITY_SCHEMAS = {
     ]
   },
   certificates: {
-    storageKey:'piping_certificates', title:'Сертификат', publicRender:() => renderCertificates(),
+    table:'certificates', toRow:certificateToRow, fromRow:mapCertificateRow, defaults:defaultCertificates,
+    title:'Сертификат', publicRender:() => renderCertificates(),
     fields:[
       {key:'titleMn', label:'Нэр (MN)', type:'text', required:true},
       {key:'titleEn', label:'Нэр (EN)', type:'text', required:true},
@@ -2808,7 +3040,8 @@ const ENTITY_SCHEMAS = {
     ]
   },
   team: {
-    storageKey:'piping_team', title:'Багийн гишүүн', publicRender:() => {},
+    table:'team', toRow:teamToRow, fromRow:mapTeamRow, defaults:defaultTeam,
+    title:'Багийн гишүүн', publicRender:() => {},
     fields:[
       {key:'nameMn', label:'Нэр (MN)', type:'text', required:true},
       {key:'nameEn', label:'Нэр (EN)', type:'text', required:true},
@@ -2819,18 +3052,24 @@ const ENTITY_SCHEMAS = {
   }
 };
 
-function getEntityList(type){
-  return getData(ENTITY_SCHEMAS[type].storageKey, []);
-}
-function saveEntityList(type, list){
-  saveData(ENTITY_SCHEMAS[type].storageKey, list);
-  ENTITY_SCHEMAS[type].publicRender();
+// Populated by renderEntityAdminList() for each type, so edit/toggle/move/
+// delete actions (which only get an id from a click handler) can read the
+// current row without an extra network round trip.
+let adminEntityCache = { projects:[], services:[], equipment:[], certificates:[], team:[] };
+
+async function getEntityList(type){
+  const schema = ENTITY_SCHEMAS[type];
+  if(sb){
+    const { data, error } = await sb.from(schema.table).select('*');
+    if(error){ console.error(error); return []; }
+    return data.map(schema.fromRow);
+  }
+  return schema.defaults.slice();
 }
 
 function openEntityEditor(type, id){
   const schema = ENTITY_SCHEMAS[type];
-  const list = getEntityList(type);
-  const item = id ? list.find(x => x.id === id) : {};
+  const item = id ? adminEntityCache[type].find(x => String(x.id) === String(id)) : {};
   document.getElementById('editorTitle').textContent = (id ? 'Засах: ' : 'Нэмэх: ') + schema.title;
   const fieldsHtml = schema.fields.map(f => {
     const val = item[f.key] !== undefined ? (f.isList && Array.isArray(item[f.key]) ? item[f.key].join(', ') : item[f.key]) : '';
@@ -2854,7 +3093,8 @@ function openEntityEditor(type, id){
   openModal('modal-editor');
 }
 
-function saveEntityFromEditor(type, id){
+async function saveEntityFromEditor(type, id){
+  if(!requireBackend()) return;
   const schema = ENTITY_SCHEMAS[type];
   const values = {};
   let valid = true;
@@ -2867,7 +3107,7 @@ function saveEntityFromEditor(type, id){
     } else {
       el.classList.remove('invalid');
     }
-    if(f.type === 'number') val = val ? Number(val) : '';
+    if(f.type === 'number') val = val ? (Number(val) || 0) : '';
     if(f.isList) val = val.split(',').map(s => s.trim()).filter(Boolean);
     values[f.key] = val;
   });
@@ -2875,52 +3115,88 @@ function saveEntityFromEditor(type, id){
     showToast('Заавал бөглөх талбаруудыг бөглөнө үү.', 'error');
     return;
   }
-  const list = getEntityList(type);
+  const saveBtn = document.getElementById('editorSaveBtn');
+  saveBtn.disabled = true;
+  const row = schema.toRow(values);
+  let error;
   if(id){
-    const idx = list.findIndex(x => x.id === id);
-    list[idx] = { ...list[idx], ...values };
+    ({ error } = await sb.from(schema.table).update(row).eq('id', id));
   } else {
-    list.push({ id:generateId(), published:true, featured:false, order:list.length, ...values });
+    row.published = true;
+    if(type === 'projects') row.featured = false;
+    ({ error } = await sb.from(schema.table).insert(row));
   }
-  saveEntityList(type, list);
+  saveBtn.disabled = false;
+  if(error){
+    console.error(error);
+    showToast('Хадгалахад алдаа гарлаа.', 'error');
+    return;
+  }
   closeModal('modal-editor');
   showToast('Амжилттай хадгалагдлаа.', 'success');
+  schema.publicRender();
   renderAdminCurrentView();
 }
 
 function deleteEntity(type, id){
-  confirmAction('Устгахдаа итгэлтэй байна уу?', () => {
-    const list = getEntityList(type).filter(x => x.id !== id);
-    saveEntityList(type, list);
+  confirmAction('Устгахдаа итгэлтэй байна уу?', async () => {
+    if(!requireBackend()) return;
+    const schema = ENTITY_SCHEMAS[type];
+    const { error } = await sb.from(schema.table).delete().eq('id', id);
+    if(error){
+      console.error(error);
+      showToast('Устгахад алдаа гарлаа.', 'error');
+      return;
+    }
+    schema.publicRender();
     renderAdminCurrentView();
     showToast('Устгагдлаа.', 'success');
   });
 }
 
-function toggleEntityField(type, id, field){
-  const list = getEntityList(type);
-  const idx = list.findIndex(x => x.id === id);
-  if(idx > -1){
-    list[idx][field] = !list[idx][field];
-    saveEntityList(type, list);
-    renderAdminCurrentView();
+async function toggleEntityField(type, id, field){
+  if(!requireBackend()) return;
+  const schema = ENTITY_SCHEMAS[type];
+  const current = adminEntityCache[type].find(x => String(x.id) === String(id));
+  if(!current) return;
+  const { error } = await sb.from(schema.table).update({ [field]: !current[field] }).eq('id', id);
+  if(error){
+    console.error(error);
+    showToast('Шинэчлэхэд алдаа гарлаа.', 'error');
+    return;
   }
-}
-
-function moveEntity(type, id, dir){
-  const list = getEntityList(type);
-  const idx = list.findIndex(x => x.id === id);
-  const swapIdx = idx + dir;
-  if(idx < 0 || swapIdx < 0 || swapIdx >= list.length) return;
-  [list[idx], list[swapIdx]] = [list[swapIdx], list[idx]];
-  saveEntityList(type, list);
+  schema.publicRender();
   renderAdminCurrentView();
 }
 
-function renderEntityAdminList(type, viewId, opts){
+async function moveEntity(type, id, dir){
+  if(!requireBackend()) return;
+  const schema = ENTITY_SCHEMAS[type];
+  const list = adminEntityCache[type];
+  const idx = list.findIndex(x => String(x.id) === String(id));
+  const swapIdx = idx + dir;
+  if(idx < 0 || swapIdx < 0 || swapIdx >= list.length) return;
+  const a = list[idx], b = list[swapIdx];
+  const aOrder = a.sortOrder, bOrder = b.sortOrder;
+  const [{ error: e1 }, { error: e2 }] = await Promise.all([
+    sb.from(schema.table).update({ sort_order: bOrder }).eq('id', a.id),
+    sb.from(schema.table).update({ sort_order: aOrder }).eq('id', b.id)
+  ]);
+  if(e1 || e2){
+    console.error(e1 || e2);
+    showToast('Дараалал өөрчлөхөд алдаа гарлаа.', 'error');
+    return;
+  }
+  schema.publicRender();
+  renderAdminCurrentView();
+}
+
+async function renderEntityAdminList(type, viewId, opts){
   opts = opts || {};
   const schema = ENTITY_SCHEMAS[type];
-  const list = getEntityList(type);
+  let list = await getEntityList(type);
+  if(type === 'services') list = list.slice().sort((a,b) => (a.sortOrder||0) - (b.sortOrder||0));
+  adminEntityCache[type] = list;
   const nameOf = item => item.titleMn || item.nameMn || item.name || 'Untitled';
   const subOf = item => item.titleEn || item.nameEn || item.category || '';
   const imgOf = item => item.image || item.heroImage || item.photo || '';
@@ -2940,11 +3216,11 @@ function renderEntityAdminList(type, viewId, opts){
               <div class="s">${escapeHtml(subOf(item))}</div>
             </div>
             <div class="actions">
-              ${opts.moveable ? `<button type="button" class="icon-btn" data-move="up" data-id="${item.id}">↑</button><button type="button" class="icon-btn" data-move="down" data-id="${item.id}">↓</button>` : ''}
-              ${opts.featureable ? `<button type="button" class="icon-btn" data-feature="${item.id}">${item.featured ? '★' : '☆'}</button>` : ''}
-              <button type="button" class="icon-btn" data-publish="${item.id}">${item.published === false ? '👁' : '🚫'}</button>
-              <button type="button" class="icon-btn" data-edit="${item.id}">✎</button>
-              <button type="button" class="icon-btn danger" data-delete="${item.id}">🗑</button>
+              ${opts.moveable ? `<button type="button" class="icon-btn" data-move="up" data-id="${escapeHtml(item.id)}">↑</button><button type="button" class="icon-btn" data-move="down" data-id="${escapeHtml(item.id)}">↓</button>` : ''}
+              ${opts.featureable ? `<button type="button" class="icon-btn" data-feature="${escapeHtml(item.id)}">${item.featured ? '★' : '☆'}</button>` : ''}
+              <button type="button" class="icon-btn" data-publish="${escapeHtml(item.id)}">${item.published === false ? '👁' : '🚫'}</button>
+              <button type="button" class="icon-btn" data-edit="${escapeHtml(item.id)}">✎</button>
+              <button type="button" class="icon-btn danger" data-delete="${escapeHtml(item.id)}">🗑</button>
             </div>
           </div>
         `).join('') : `<div class="cert-empty">Одоогоор бичлэг алга байна.</div>`}
@@ -2968,18 +3244,18 @@ function renderAdminTeamView(){ renderEntityAdminList('team', 'view-team', {}); 
 /* =====================================================================
    ADMIN: CONTENT MANAGEMENT
 ===================================================================== */
-function applySettingsToPublicSite(){
-  const s = getData('piping_company_settings', defaultCompanySettings);
-  document.title = s.seoTitle;
-  document.getElementById('metaDescription').setAttribute('content', s.seoDescription);
-  renderContactInfo();
+async function applySettingsToPublicSite(){
   statsAnimated = false;
   renderStats();
-  applyLanguage(currentLang);
+  await loadCompanySettings();
 }
 
 function renderAdminContentView(){
-  const s = getData('piping_company_settings', defaultCompanySettings);
+  if(!sb){
+    document.getElementById('view-content').innerHTML = `<div class="cert-empty">Backend тохируулаагүй байна. README.md-г үзнэ үү.</div>`;
+    return;
+  }
+  const s = companySettingsCache;
   const stats = getData('piping_statistics', companyStatistics);
   document.getElementById('view-content').innerHTML = `
     <h1 class="admin-h1">КОНТЕНТ</h1>
@@ -3038,14 +3314,16 @@ function renderAdminContentView(){
     </div>
   `;
 
-  document.getElementById('ctSaveHeroBtn').addEventListener('click', () => {
-    const cur = getData('piping_company_settings', defaultCompanySettings);
-    cur.heroTitleMn = document.getElementById('ctHeroTitle').value;
-    cur.heroDescMn = document.getElementById('ctHeroDesc').value;
-    cur.aboutP1Mn = document.getElementById('ctAboutP1').value;
-    cur.aboutP2Mn = document.getElementById('ctAboutP2').value;
-    saveData('piping_company_settings', cur);
-    applySettingsToPublicSite();
+  document.getElementById('ctSaveHeroBtn').addEventListener('click', async () => {
+    if(!requireBackend()) return;
+    const { error } = await sb.from('company_settings').update({
+      hero_title_mn: document.getElementById('ctHeroTitle').value,
+      hero_desc_mn: document.getElementById('ctHeroDesc').value,
+      about_p1_mn: document.getElementById('ctAboutP1').value,
+      about_p2_mn: document.getElementById('ctAboutP2').value
+    }).eq('id', 1);
+    if(error){ console.error(error); showToast('Хадгалахад алдаа гарлаа.', 'error'); return; }
+    await applySettingsToPublicSite();
     showToast('Контент хадгалагдлаа.', 'success');
   });
 
@@ -3063,30 +3341,35 @@ function renderAdminContentView(){
     showToast('Статистик хадгалагдлаа.', 'success');
   });
 
-  document.getElementById('ctSaveCompanyBtn').addEventListener('click', () => {
-    const cur = getData('piping_company_settings', defaultCompanySettings);
-    cur.companyPhone = document.getElementById('ctPhone').value;
-    cur.projectPhone = document.getElementById('ctProjectPhone').value;
-    cur.companyEmail = document.getElementById('ctEmail').value;
-    cur.workingHours = document.getElementById('ctHours').value;
-    cur.companyAddress = document.getElementById('ctAddress').value;
-    cur.facebookUrl = document.getElementById('ctFacebook').value;
-    cur.instagramUrl = document.getElementById('ctInstagram').value;
-    cur.linkedinUrl = document.getElementById('ctLinkedin').value;
-    cur.googleMapsUrl = document.getElementById('ctMapsUrl').value;
-    cur.footerDesc = document.getElementById('ctFooterDesc').value;
-    saveData('piping_company_settings', cur);
-    renderContactInfo();
+  document.getElementById('ctSaveCompanyBtn').addEventListener('click', async () => {
+    if(!requireBackend()) return;
+    const { error } = await sb.from('company_settings').update({
+      company_phone: document.getElementById('ctPhone').value,
+      project_phone: document.getElementById('ctProjectPhone').value,
+      company_email: document.getElementById('ctEmail').value,
+      working_hours: document.getElementById('ctHours').value,
+      company_address: document.getElementById('ctAddress').value,
+      facebook_url: document.getElementById('ctFacebook').value,
+      instagram_url: document.getElementById('ctInstagram').value,
+      linkedin_url: document.getElementById('ctLinkedin').value,
+      google_maps_url: document.getElementById('ctMapsUrl').value,
+      footer_desc: document.getElementById('ctFooterDesc').value
+    }).eq('id', 1);
+    if(error){ console.error(error); showToast('Хадгалахад алдаа гарлаа.', 'error'); return; }
+    await loadCompanySettings();
     showToast('Компанийн мэдээлэл хадгалагдлаа.', 'success');
   });
 
-  document.getElementById('ctSaveSeoBtn').addEventListener('click', () => {
-    const cur = getData('piping_company_settings', defaultCompanySettings);
-    cur.seoTitle = document.getElementById('ctSeoTitle').value;
-    cur.seoDescription = document.getElementById('ctSeoDesc').value;
-    saveData('piping_company_settings', cur);
-    document.title = cur.seoTitle;
-    document.getElementById('metaDescription').setAttribute('content', cur.seoDescription);
+  document.getElementById('ctSaveSeoBtn').addEventListener('click', async () => {
+    if(!requireBackend()) return;
+    const seoTitle = document.getElementById('ctSeoTitle').value;
+    const seoDescription = document.getElementById('ctSeoDesc').value;
+    const { error } = await sb.from('company_settings').update({ seo_title:seoTitle, seo_description:seoDescription }).eq('id', 1);
+    if(error){ console.error(error); showToast('Хадгалахад алдаа гарлаа.', 'error'); return; }
+    companySettingsCache.seoTitle = seoTitle;
+    companySettingsCache.seoDescription = seoDescription;
+    document.title = seoTitle;
+    document.getElementById('metaDescription').setAttribute('content', seoDescription);
     showToast('SEO мэдээлэл хадгалагдлаа.', 'success');
   });
 }
@@ -3094,30 +3377,21 @@ function renderAdminContentView(){
 /* =====================================================================
    ADMIN: SETTINGS
 ===================================================================== */
-function renderAdminSettingsView(){
+async function renderAdminSettingsView(){
+  let adminEmail = '—';
+  if(sb){
+    const { data } = await sb.auth.getUser();
+    adminEmail = data.user ? data.user.email : '—';
+  }
   document.getElementById('view-settings').innerHTML = `
     <h1 class="admin-h1">ТОХИРГОО</h1>
     <p class="admin-sub">Системийн ерөнхий тохиргоо.</p>
     <div class="admin-panel">
       <div class="admin-panel-head"><h3>Админ бүртгэл</h3></div>
-      <div class="form-group"><label>И-мэйл</label><input type="text" class="form-control" value="${ADMIN_CONFIG.email}" disabled></div>
-      <p style="color:#8a97a4;font-size:12.5px;">Нууц үгийг талбарт харуулахгүй. Нууц үгийг сервер талын аутентикацид шилжихдээ тохируулна уу.</p>
-    </div>
-    <div class="admin-panel">
-      <div class="admin-panel-head"><h3>Өгөгдлийн сан</h3></div>
-      <p style="color:#5a6b7b;font-size:13.5px;margin-bottom:16px;">Бүх демо өгөгдлийг үндсэн байдалд шинэчлэх. Энэ үйлдэл нь одоогийн бүх хүсэлт, мессежийг устгана.</p>
-      <button type="button" class="btn btn-outline-dark" id="settingsResetBtn" style="border-color:#c0392b;color:#c0392b;">ӨГӨГДЛИЙГ ШИНЭЧЛЭХ</button>
+      <div class="form-group"><label>И-мэйл</label><input type="text" class="form-control" value="${escapeHtml(adminEmail)}" disabled></div>
+      <p style="color:#8a97a4;font-size:12.5px;">Нэвтрэх эрх Supabase Auth-аар удирдагдана. Нууц үг солих бол Supabase Dashboard -&gt; Authentication хэсгээс хийнэ үү.</p>
     </div>
   `;
-  document.getElementById('settingsResetBtn').addEventListener('click', () => {
-    confirmAction('Бүх демо өгөгдлийг устгаж, анхны байдалд шинэчлэхдээ итгэлтэй байна уу?', () => {
-      ['piping_company_settings','piping_statistics','piping_services','piping_projects','piping_equipment','piping_certificates','piping_team','piping_project_requests','piping_contact_messages'].forEach(k => localStorage.removeItem(k));
-      initializeData();
-      applySettingsToPublicSite();
-      renderAdminCurrentView();
-      showToast('Өгөгдөл шинэчлэгдлээ.', 'success');
-    });
-  });
 }
 
 /* =====================================================================
@@ -3126,13 +3400,14 @@ function renderAdminSettingsView(){
 document.addEventListener('DOMContentLoaded', () => {
   initializeData();
   initLogos();
-  const settings = getData('piping_company_settings', defaultCompanySettings);
-  document.title = settings.seoTitle;
-  document.getElementById('metaDescription').setAttribute('content', settings.seoDescription);
+  if(!sb){
+    showToast(currentLang === 'mn'
+      ? 'Backend тохируулаагүй тул жишээ өгөгдөл харагдаж байна. README.md-г үзнэ үү.'
+      : 'Backend not configured -- showing example data. See README.md to connect Supabase.', 'info');
+  }
 
   renderStats();
-  renderContactInfo();
-  applyLanguage(currentLang);
+  loadCompanySettings();
 
   initNavbarScroll();
   initSmoothScroll();
